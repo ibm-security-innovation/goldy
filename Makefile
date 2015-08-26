@@ -33,7 +33,7 @@ endif
 APP = dtlsproxy
 OBJS = dtlsproxy.o
 
-.PHONY: all clean deps
+.PHONY: all clean distclean deps generate_test_keys
 
 all: $(APP)
 
@@ -61,3 +61,10 @@ distclean: clean
 
 deps:
 	$(MAKE) -C deps download_deps build_deps
+
+generate_test_keys:
+	$(MBEDTLS_INC_DIR)/../programs/pkey/gen_key \
+		type=ec ec_curve=secp256r1 format=pem filename=proxy-key.pem
+	$(MBEDTLS_INC_DIR)/../programs/x509/cert_write \
+		issuer_name="CN=dtlsproxy.local, O=Dummy Ltd, C=US" \
+		selfsign=1 issuer_key=proxy-key.pem output_file=proxy-cert.pem
