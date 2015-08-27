@@ -1,3 +1,5 @@
 /dtlsproxy
 /*.o
+/test/dtls_test_client
+/test/*.o
 /deps/mbedtls-*

@@ -33,15 +33,21 @@ endif
 APP = dtlsproxy
 OBJS = dtlsproxy.o
 
+TEST_APP = test/dtls_test_client
+TEST_OBJS = test/dtls_test_client.o
+
 .PHONY: all clean distclean deps generate_test_keys
 
-all: $(APP)
+all: $(APP) $(TEST_APP)
 
 $(APP): $(OBJS) $(MBEDTLS_LIBS)
 	$(LINK) -o $@ $^
 
+$(TEST_APP): $(TEST_OBJS) $(MBEDTLS_LIBS)
+	$(LINK) -o $@ $^
+
 %.o: %.c $(MBEDTLS_CONFIG_INC)
-	$(COMPILE) -c $<
+	$(COMPILE) -o $@ -c $<
 
 $(MBEDTLS_CONFIG_INC):
 	@echo ""
@@ -54,7 +60,7 @@ $(MBEDTLS_CONFIG_INC):
 	@false
 
 clean:
-	rm -f $(APP) $(OBJS)
+	rm -f $(APP) $(OBJS) $(TEST_APP) $(TEST_OBJS)
 
 distclean: clean
 	$(MAKE) -C deps distclean
