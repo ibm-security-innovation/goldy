@@ -36,9 +36,9 @@ OBJS = dtlsproxy.o
 TEST_APP = test/dtls_test_client
 TEST_OBJS = test/dtls_test_client.o
 
-.PHONY: all clean distclean deps generate_test_keys
+.PHONY: all clean distclean deps test
 
-all: $(APP) $(TEST_APP)
+all: $(APP)
 
 $(APP): $(OBJS) $(MBEDTLS_LIBS)
 	$(LINK) -o $@ $^
@@ -68,9 +68,14 @@ distclean: clean
 deps:
 	$(MAKE) -C deps download_deps build_deps
 
-generate_test_keys:
+test: $(TEST_APP) test-proxy-key.pem test-proxy-cert.pem
+	test/run_test.sh
+
+test-proxy-key.pem:
 	$(MBEDTLS_INC_DIR)/../programs/pkey/gen_key \
-		type=ec ec_curve=secp256r1 format=pem filename=proxy-key.pem
+		type=ec ec_curve=secp256r1 format=pem filename=test-proxy-key.pem
+
+test-proxy-cert.pem: test-proxy-key.pem
 	$(MBEDTLS_INC_DIR)/../programs/x509/cert_write \
 		issuer_name="CN=dtlsproxy.local, O=Dummy Ltd, C=US" \
-		selfsign=1 issuer_key=proxy-key.pem output_file=proxy-cert.pem
+		selfsign=1 issuer_key=test-proxy-key.pem output_file=test-proxy-cert.pem
