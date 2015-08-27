@@ -79,6 +79,7 @@ int connect_to_udp_backend() {
     struct addrinfo hints;
     struct addrinfo *result, *rp;
     int ret, sfd;
+    const char *backend_port = "29502";
 
     memset(&hints, 0, sizeof(struct addrinfo));
     hints.ai_family = AF_INET;
@@ -86,7 +87,7 @@ int connect_to_udp_backend() {
     hints.ai_flags = 0;
     hints.ai_protocol = 0;
 
-    ret = getaddrinfo("127.0.0.1", "5683", &hints, &result);
+    ret = getaddrinfo("127.0.0.1", backend_port, &hints, &result);
     if (ret != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(ret));
         exit(EXIT_FAILURE);
@@ -125,6 +126,7 @@ int main( void )
     mbedtls_net_context listen_fd, client_fd;
     unsigned char buf[1024];
     const char *pers = "dtls_server";
+    const char *listen_port = "29501";
     unsigned char client_ip[16] = { 0 };
     size_t cliip_len;
     mbedtls_ssl_cookie_ctx cookie_ctx;
@@ -200,10 +202,10 @@ int main( void )
     /*
      * 2. Setup the "listening" UDP socket
      */
-    printf( "  . Bind on udp/*/4433 ..." );
+    printf( "  . Bind on udp/*/%s ...", listen_port );
     fflush( stdout );
 
-    if( ( ret = mbedtls_net_bind( &listen_fd, NULL, "4433", MBEDTLS_NET_PROTO_UDP ) ) != 0 )
+    if( ( ret = mbedtls_net_bind( &listen_fd, NULL, listen_port, MBEDTLS_NET_PROTO_UDP ) ) != 0 )
     {
         printf( " failed\n  ! mbedtls_net_bind returned %d\n\n", ret );
         goto exit;
@@ -417,6 +419,8 @@ reset:
     printf( "  > Write to client:" );
     fflush( stdout );
 
+    strcpy((char*)buf, "the-response");
+    len = strlen((char*)buf);
     do ret = mbedtls_ssl_write( &ssl, buf, len );
     while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
            ret == MBEDTLS_ERR_SSL_WANT_WRITE );
