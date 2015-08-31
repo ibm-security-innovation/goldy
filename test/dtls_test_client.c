@@ -1,54 +1,13 @@
 /*
- *  Simple DTLS client demonstration program
- *
- *  Copyright (C) 2014-2015, ARM Limited, All Rights Reserved
- *
- *  This file is part of mbed TLS (https://tls.mbed.org)
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * dtls_test_client.c -
  */
 
-#if !defined(MBEDTLS_CONFIG_FILE)
+#if defined(__linux__)
+#define _XOPEN_SOURCE 700
+#endif
+
 #include "mbedtls/config.h"
-#else
-#include MBEDTLS_CONFIG_FILE
-#endif
-
-#if defined(MBEDTLS_PLATFORM_C)
 #include "mbedtls/platform.h"
-#else
-#include <stdio.h>
-#endif
-
-#if !defined(MBEDTLS_SSL_CLI_C) || !defined(MBEDTLS_SSL_PROTO_DTLS) ||    \
-    !defined(MBEDTLS_NET_C)  || !defined(MBEDTLS_TIMING_C) ||             \
-    !defined(MBEDTLS_ENTROPY_C) || !defined(MBEDTLS_CTR_DRBG_C) ||        \
-    !defined(MBEDTLS_X509_CRT_PARSE_C) || !defined(MBEDTLS_RSA_C) ||      \
-    !defined(MBEDTLS_CERTS_C)
-int main( void )
-{
-    printf( "MBEDTLS_SSL_CLI_C and/or MBEDTLS_SSL_PROTO_DTLS and/or "
-            "MBEDTLS_NET_C and/or MBEDTLS_TIMING_C and/or "
-            "MBEDTLS_ENTROPY_C and/or MBEDTLS_CTR_DRBG_C and/or "
-            "MBEDTLS_X509_CRT_PARSE_C and/or MBEDTLS_RSA_C and/or "
-            "MBEDTLS_CERTS_C and/or MBEDTLS_PEM_PARSE_C not defined.\n" );
-    return( 0 );
-}
-#else
-
-#include <string.h>
 
 #include "mbedtls/net.h"
 #include "mbedtls/debug.h"
@@ -59,10 +18,8 @@ int main( void )
 #include "mbedtls/certs.h"
 #include "mbedtls/timing.h"
 
-#define SERVER_PORT "29501"
-#define SERVER_NAME "localhost"
-#define SERVER_ADDR "127.0.0.1" /* forces IPv4 */
-#define MESSAGE     "Echo this message body"
+#include <getopt.h>
+#include <string.h>
 
 #define READ_TIMEOUT_MS 2000
 #define MAX_RETRY       5
@@ -79,14 +36,24 @@ static void my_debug( void *ctx, int level,
     fflush(  (FILE *) ctx  );
 }
 
+void print_usage(const char* argv0) {
+    printf("Usage: %s -h host -p port [-n ssl_hostname] -b packet_body\n", argv0);
+    exit(1);
+}
+
 int main( int argc, char *argv[] )
 {
     int ret, len;
     mbedtls_net_context server_fd;
     uint32_t flags;
     unsigned char buf[10000];
+    char packet_body[10000] = "";
+    char server_host[100] = "";
+    char server_port[6] = "";
+    char server_ssl_hostname[100] = "";
     const char *pers = "dtls_client";
     int retry_left = MAX_RETRY;
+    int opt;
 
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context ctr_drbg;
@@ -95,8 +62,33 @@ int main( int argc, char *argv[] )
     mbedtls_x509_crt cacert;
     mbedtls_timing_delay_context timer;
 
-    ((void) argc);
-    ((void) argv);
+    /* Parse command line */
+    while ((opt = getopt(argc, argv, "b:h:n:p:")) != -1) {
+        switch (opt) {
+        case 'b':
+            strncpy(packet_body, optarg, sizeof(packet_body));
+            break;
+        case 'h':
+            strncpy(server_host, optarg, sizeof(server_host));
+            break;
+        case 'n':
+            strncpy(server_ssl_hostname, optarg, sizeof(server_ssl_hostname));
+            break;
+        case 'p':
+            strncpy(server_port, optarg, sizeof(server_port));
+            break;
+        default: /* '?' */
+            print_usage(argv[0]);
+        }
+    }
+
+    if (!(packet_body[0] && server_port[0] && server_host[0])) {
+        print_usage(argv[0]);
+    }
+
+    if (!server_ssl_hostname[0]) {
+        strncpy(server_ssl_hostname, server_host, sizeof(server_ssl_hostname));
+    }
 
 #if defined(MBEDTLS_DEBUG_C)
     mbedtls_debug_set_threshold( DEBUG_LEVEL );
@@ -144,11 +136,10 @@ int main( int argc, char *argv[] )
     /*
      * 1. Start the connection
      */
-    printf( "dtls_test_client: Connecting to udp/%s/%s...\n", SERVER_NAME, SERVER_PORT );
+    printf( "dtls_test_client: Connecting to udp %s:%s (SSL hostname: %s)...\n", server_host, server_port, server_ssl_hostname);
     fflush( stdout );
 
-    if( ( ret = mbedtls_net_connect( &server_fd, SERVER_ADDR,
-                                         SERVER_PORT, MBEDTLS_NET_PROTO_UDP ) ) != 0 )
+    if ((ret = mbedtls_net_connect(&server_fd, server_host, server_port, MBEDTLS_NET_PROTO_UDP)) != 0)
     {
         printf( " failed\n  ! mbedtls_net_connect returned %d\n\n", ret );
         goto exit;
@@ -177,7 +168,8 @@ int main( int argc, char *argv[] )
     mbedtls_ssl_conf_authmode( &conf, MBEDTLS_SSL_VERIFY_OPTIONAL );
     mbedtls_ssl_conf_ca_chain( &conf, &cacert, NULL );
     mbedtls_ssl_conf_rng( &conf, mbedtls_ctr_drbg_random, &ctr_drbg );
-    mbedtls_ssl_conf_dbg( &conf, my_debug, stdout );
+    mbedtls_ssl_conf_dbg( &conf, my_debug, stdout ); /* TODO remove */
+    /* TODO timeouts */
 
     if( ( ret = mbedtls_ssl_setup( &ssl, &conf ) ) != 0 )
     {
@@ -185,7 +177,7 @@ int main( int argc, char *argv[] )
         goto exit;
     }
 
-    if( ( ret = mbedtls_ssl_set_hostname( &ssl, SERVER_NAME ) ) != 0 )
+    if( ( ret = mbedtls_ssl_set_hostname( &ssl, server_ssl_hostname ) ) != 0 )
     {
         printf( " failed\n  ! mbedtls_ssl_set_hostname returned %d\n\n", ret );
         goto exit;
@@ -245,9 +237,9 @@ send_request:
     printf( "dtls_test_client: Write to server:\n" );
     fflush( stdout );
 
-    len = sizeof( MESSAGE ) - 1;
+    len = strlen(packet_body);
 
-    do ret = mbedtls_ssl_write( &ssl, (unsigned char *) MESSAGE, len );
+    do ret = mbedtls_ssl_write( &ssl, (unsigned char *) packet_body, len );
     while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
            ret == MBEDTLS_ERR_SSL_WANT_WRITE );
 
@@ -258,7 +250,7 @@ send_request:
     }
 
     len = ret;
-    printf( "dtls_test_client: %d bytes written: '%s'\n", len, MESSAGE );
+    printf( "dtls_test_client: %d bytes written: '%s'\n", len, packet_body );
 
     /*
      * 7. Read the echo response
@@ -333,13 +325,5 @@ exit:
     mbedtls_ctr_drbg_free( &ctr_drbg );
     mbedtls_entropy_free( &entropy );
 
-    /* Shell can not handle large exit numbers -> 1 for errors */
-    if( ret < 0 )
-        ret = 1;
-
-    return( ret );
+    return ret == 0 ? 0 : 1;
 }
-#endif /* MBEDTLS_SSL_CLI_C && MBEDTLS_SSL_PROTO_DTLS && MBEDTLS_NET_C &&
-          MBEDTLD_TIMING_C && MBEDTLS_ENTROPY_C && MBEDTLS_CTR_DRBG_C &&
-          MBEDTLS_X509_CRT_PARSE_C && MBEDTLS_RSA_C && MBEDTLS_CERTS_C &&
-          MBEDTLS_PEM_PARSE_C */

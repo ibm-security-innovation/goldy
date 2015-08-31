@@ -1,11 +1,7 @@
-
-# To compile on SunOS: add "-lsocket -lnsl" to LDFLAGS
-# To compile with PKCS11: add "-lpkcs11-helper" to LDFLAGS
-
 MBEDTLS_INC_DIR ?= deps/mbedtls-2.0.0/include
 MBEDTLS_LIB_DIR ?= deps/mbedtls-2.0.0/library
 
-CFLAGS	?= -O2
+CFLAGS ?= -O2
 WARNING_CFLAGS ?= -Wall -W -Wdeclaration-after-statement
 LDFLAGS ?=
 
@@ -68,14 +64,14 @@ distclean: clean
 deps:
 	$(MAKE) -C deps download_deps build_deps
 
-test: $(TEST_APP) test-proxy-key.pem test-proxy-cert.pem
+test: $(TEST_APP) test/keys/test-proxy-key.pem test/keys/test-proxy-cert.pem
 	test/run_test.sh
 
-test-proxy-key.pem:
+test/keys/test-proxy-key.pem:
 	$(MBEDTLS_INC_DIR)/../programs/pkey/gen_key \
-		type=ec ec_curve=secp256r1 format=pem filename=test-proxy-key.pem
+		type=ec ec_curve=secp256r1 format=pem filename=$@
 
-test-proxy-cert.pem: test-proxy-key.pem
+test/keys/test-proxy-cert.pem: test/keys/test-proxy-key.pem
 	$(MBEDTLS_INC_DIR)/../programs/x509/cert_write \
 		issuer_name="CN=dtlsproxy.local, O=Dummy Ltd, C=US" \
-		selfsign=1 issuer_key=test-proxy-key.pem output_file=test-proxy-cert.pem
+		selfsign=1 issuer_key=$< output_file=$@

@@ -2,51 +2,12 @@
  * DTLS proxy
  */
 
-#if !defined(MBEDTLS_CONFIG_FILE)
+#if defined(__linux__)
+#define _XOPEN_SOURCE 700
+#endif
+
 #include "mbedtls/config.h"
-#else
-#include MBEDTLS_CONFIG_FILE
-#endif
-
-#if defined(MBEDTLS_PLATFORM_C)
 #include "mbedtls/platform.h"
-#else
-#include <stdio.h>
-#define mbedtls_printf     printf
-#define mbedtls_fprintf    fprintf
-#endif
-
-#if !defined(MBEDTLS_SSL_SRV_C) || !defined(MBEDTLS_SSL_PROTO_DTLS) ||    \
-    !defined(MBEDTLS_SSL_COOKIE_C) || !defined(MBEDTLS_NET_C) ||          \
-    !defined(MBEDTLS_ENTROPY_C) || !defined(MBEDTLS_CTR_DRBG_C) ||        \
-    !defined(MBEDTLS_X509_CRT_PARSE_C) || !defined(MBEDTLS_RSA_C) ||      \
-    !defined(MBEDTLS_CERTS_C) || !defined(MBEDTLS_PEM_PARSE_C) ||         \
-    !defined(MBEDTLS_TIMING_C)
-
-int main( void )
-{
-    printf( "MBEDTLS_SSL_SRV_C and/or MBEDTLS_SSL_PROTO_DTLS and/or "
-            "MBEDTLS_SSL_COOKIE_C and/or MBEDTLS_NET_C and/or "
-            "MBEDTLS_ENTROPY_C and/or MBEDTLS_CTR_DRBG_C and/or "
-            "MBEDTLS_X509_CRT_PARSE_C and/or MBEDTLS_RSA_C and/or "
-            "MBEDTLS_CERTS_C and/or MBEDTLS_PEM_PARSE_C and/or "
-            "MBEDTLS_TIMING_C not defined.\n" );
-    return( 0 );
-}
-#else
-
-#if defined(_WIN32)
-#include <windows.h>
-#endif
-
-#include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <netdb.h>
 
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
@@ -63,70 +24,76 @@ int main( void )
 #include "mbedtls/ssl_cache.h"
 #endif
 
-#define DEBUG_LEVEL 0
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <getopt.h>
 
-static void my_debug( void *ctx, int level,
-                      const char *file, int line,
-                      const char *str )
-{
-    ((void) level);
-
-    mbedtls_fprintf( (FILE *) ctx, "%s:%04d: %s", file, line, str );
-    fflush(  (FILE *) ctx  );
-}
-
-int connect_to_udp_backend() {
+int connect_to_udp_backend(const char *backend_host, const char* backend_port) {
     struct addrinfo hints;
-    struct addrinfo *result, *rp;
+    struct addrinfo *result;
+    struct addrinfo *rp;
     int ret, sfd;
-    const char *backend_port = "29502";
 
-    memset(&hints, 0, sizeof(struct addrinfo));
+    memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
     hints.ai_flags = 0;
     hints.ai_protocol = 0;
 
-    ret = getaddrinfo("127.0.0.1", backend_port, &hints, &result);
+    ret = getaddrinfo(backend_host, backend_port, &hints, &result);
     if (ret != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(ret));
         exit(EXIT_FAILURE);
     }
 
-    /* getaddrinfo() returns a list of address structures.
-       Try each address until we successfully connect(2).
-       If socket(2) (or connect(2)) fails, we (close the socket
-       and) try the next address. */
-
-    for (rp = result; rp != NULL; rp = rp->ai_next) {
+    for (rp = result; rp; rp = rp->ai_next) {
         sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (sfd == -1)
+        if (sfd == -1) {
             continue;
+        }
 
-        if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
-            break;                  /* Success */
+        if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1) {
+            break; /* Success */
+        }
 
         close(sfd);
     }
 
-    freeaddrinfo(result);           /* No longer needed */
+    freeaddrinfo(result);
 
-    if (rp == NULL) {               /* No address succeeded */
-        printf("Could not connect\n");
+    if (!rp) {
+        printf("failed: could not connect to UDP backend\n");
         return -1;
     }
 
     return sfd;
 }
 
-int main( void )
+void print_usage(const char* argv0) {
+    printf("Usage: %s -l listen_host:port -b backend_host:port\n", argv0);
+    exit(1);
+}
+
+int main( int argc, char *argv[] )
 {
-    int ret, len;
+    int ret, len, opt;
+    char* sep;
     int backend_fd;
     mbedtls_net_context listen_fd, client_fd;
     unsigned char buf[1024];
-    const char *pers = "dtls_server";
-    const char *listen_port = "29501";
+    const char *pers = "dtlsproxy";
+    char listen_host[100] = "";
+    char listen_port[6] = "";
+    char backend_host[100] = "";
+    char backend_port[6] = "";
+    char cert_file[1024] = "";
+    char private_key_file[1024] = "";
     unsigned char client_ip[16] = { 0 };
     size_t cliip_len;
     mbedtls_ssl_cookie_ctx cookie_ctx;
@@ -142,6 +109,44 @@ int main( void )
     mbedtls_ssl_cache_context cache;
 #endif
 
+    /* Parse command line */
+    while ((opt = getopt(argc, argv, "b:c:l:k:")) != -1) {
+        switch (opt) {
+        case 'b':
+            sep = strchr(optarg, ':');
+            if (!sep) {
+                print_usage(argv[0]);
+            }
+            *sep = '\0';
+            strncpy(backend_host, optarg, sizeof(backend_host));
+            strncpy(backend_port, sep + 1, sizeof(backend_port));
+            break;
+        case 'c':
+            strncpy(cert_file, optarg, sizeof(cert_file));
+            break;
+        case 'l':
+            sep = strchr(optarg, ':');
+            if (!sep) {
+                print_usage(argv[0]);
+            }
+            *sep = '\0';
+            strncpy(listen_host, optarg, sizeof(listen_host));
+            strncpy(listen_port, sep + 1, sizeof(listen_port));
+            break;
+        case 'k':
+            strncpy(private_key_file, optarg, sizeof(private_key_file));
+            break;
+        default: /* '?' */
+            print_usage(argv[0]);
+        }
+    }
+
+    if (!(listen_host[0] && listen_port[0] &&
+          backend_host[0] && backend_port[0] &&
+          cert_file[0] && private_key_file[0])) {
+        print_usage(argv[0]);
+    }
+
     mbedtls_net_init( &listen_fd );
     mbedtls_net_init( &client_fd );
     mbedtls_ssl_init( &ssl );
@@ -155,42 +160,20 @@ int main( void )
     mbedtls_entropy_init( &entropy );
     mbedtls_ctr_drbg_init( &ctr_drbg );
 
-#if defined(MBEDTLS_DEBUG_C)
-    mbedtls_debug_set_threshold( DEBUG_LEVEL );
-#endif
-
     /*
-     * 1. Load the certificates and private RSA key
+     * 1. Load the certificates and private key
      */
     printf( "\n  . Loading the server cert. and key..." );
     fflush( stdout );
 
-    /*
-     * This demonstration program uses embedded test certificates.
-     * Instead, you may want to use mbedtls_x509_crt_parse_file() to read the
-     * server and CA certificates, as well as mbedtls_pk_parse_keyfile().
-     */
-
-    //ret = mbedtls_x509_crt_parse( &srvcert, (const unsigned char *) mbedtls_test_srv_crt,
-    //                      mbedtls_test_srv_crt_len );
-    ret = mbedtls_x509_crt_parse_file(&srvcert, "server-ec-cert.pem");
+    ret = mbedtls_x509_crt_parse_file(&srvcert, cert_file);
     if( ret != 0 )
     {
         printf( " failed\n  !  mbedtls_x509_crt_parse returned %d\n\n", ret );
         goto exit;
     }
 
-  //  ret = mbedtls_x509_crt_parse( &srvcert, (const unsigned char *) mbedtls_test_cas_pem,
-  //                        mbedtls_test_cas_pem_len );
-  //  if( ret != 0 )
-  //  {
-  //      printf( " failed\n  !  mbedtls_x509_crt_parse returned %d\n\n", ret );
-  //      goto exit;
-  //  }
-
-//    ret =  mbedtls_pk_parse_key( &pkey, (const unsigned char *) mbedtls_test_srv_key,
-//                         mbedtls_test_srv_key_len, NULL, 0 );
-    ret = mbedtls_pk_parse_keyfile(&pkey, "server-ec-key.pem", NULL);
+    ret = mbedtls_pk_parse_keyfile(&pkey, private_key_file, NULL);
     if( ret != 0 )
     {
         printf( " failed\n  !  mbedtls_pk_parse_key returned %d\n\n", ret );
@@ -202,10 +185,10 @@ int main( void )
     /*
      * 2. Setup the "listening" UDP socket
      */
-    printf( "  . Bind on udp/*/%s ...", listen_port );
+    printf( "  . Bind on udp %s:%s ...", listen_host, listen_port );
     fflush( stdout );
 
-    if( ( ret = mbedtls_net_bind( &listen_fd, NULL, listen_port, MBEDTLS_NET_PROTO_UDP ) ) != 0 )
+    if( ( ret = mbedtls_net_bind( &listen_fd, listen_host, listen_port, MBEDTLS_NET_PROTO_UDP ) ) != 0 )
     {
         printf( " failed\n  ! mbedtls_net_bind returned %d\n\n", ret );
         goto exit;
@@ -245,7 +228,6 @@ int main( void )
     }
 
     mbedtls_ssl_conf_rng( &conf, mbedtls_ctr_drbg_random, &ctr_drbg );
-    mbedtls_ssl_conf_dbg( &conf, my_debug, stdout );
 
 #if defined(MBEDTLS_SSL_CACHE_C)
     mbedtls_ssl_conf_session_cache( &conf, &cache,
@@ -286,8 +268,8 @@ reset:
     if( ret != 0 )
     {
         char error_buf[100];
-        mbedtls_strerror( ret, error_buf, 100 );
-        printf("Last error was: %d - %s\n\n", ret, error_buf );
+        mbedtls_strerror(ret, error_buf, sizeof(error_buf));
+        printf("Last error was: %d - %s\n\n", ret, error_buf);
     }
 #endif
 
@@ -321,12 +303,12 @@ reset:
 
         getpeername(client_fd.fd, &addr.sockaddr, &addrlen);
 
-        // deal with both IPv4 and IPv6:
+        /* deal with both IPv4 and IPv6: */
         if (addr.storage.ss_family == AF_INET) {
             struct sockaddr_in *s_ip4 = &addr.in;
             client_port = ntohs(s_ip4->sin_port);
             inet_ntop(AF_INET, &s_ip4->sin_addr, client_ip_str, sizeof(client_ip_str));
-        } else { // AF_INET6
+        } else {
             struct sockaddr_in6 *s_ip6 = &addr.in6;
             client_port = ntohs(s_ip6->sin6_port);
             inet_ntop(AF_INET6, &s_ip6->sin6_addr, client_ip_str, sizeof(client_ip_str));
@@ -408,9 +390,16 @@ reset:
     len = ret;
     printf( " %d bytes read\n\n%s\n\n", len, buf );
 
-    backend_fd = connect_to_udp_backend();
+    backend_fd = connect_to_udp_backend(backend_host, backend_port);
     ret = send(backend_fd, buf, len, 0);
-    printf("  %d bytes sent to backend server\n", ret);
+    printf("  %d bytes sent to backend server (%s:%s)\n", ret, backend_host, backend_port);
+
+    /* Wait for response */
+    len = sizeof(buf) - 1;
+    memset(buf, 0, sizeof(buf));
+    ret = recv(backend_fd, buf, len, 0);
+    printf("  %d bytes received from backend server\n", ret);
+
     close(backend_fd);
 
     /*
@@ -419,8 +408,7 @@ reset:
     printf( "  > Write to client:" );
     fflush( stdout );
 
-    strcpy((char*)buf, "the-response");
-    len = strlen((char*)buf);
+    len = ret;
     do ret = mbedtls_ssl_write( &ssl, buf, len );
     while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
            ret == MBEDTLS_ERR_SSL_WANT_WRITE );
@@ -477,18 +465,5 @@ exit:
     mbedtls_ctr_drbg_free( &ctr_drbg );
     mbedtls_entropy_free( &entropy );
 
-#if defined(_WIN32)
-    printf( "  Press Enter to exit this program.\n" );
-    fflush( stdout ); getchar();
-#endif
-
-    /* Shell can not handle large exit numbers -> 1 for errors */
-    if( ret < 0 )
-        ret = 1;
-
-    return( ret );
+    return ret == 0 ? 0 : 1;
 }
-#endif /* MBEDTLS_SSL_SRV_C && MBEDTLS_SSL_PROTO_DTLS &&
-          MBEDTLS_SSL_COOKIE_C && MBEDTLS_NET_C && MBEDTLS_ENTROPY_C &&
-          MBEDTLS_CTR_DRBG_C && MBEDTLS_X509_CRT_PARSE_C && MBEDTLS_RSA_C
-          && MBEDTLS_CERTS_C && MBEDTLS_PEM_PARSE_C && MBEDTLS_TIMING_C */
