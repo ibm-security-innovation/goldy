@@ -1,5 +1,5 @@
 /*
- * DTLS proxy
+ * goldy - DTLS proxy
  */
 
 #if defined(__linux__)
@@ -86,8 +86,8 @@ int main( int argc, char *argv[] )
     char* sep;
     int backend_fd;
     mbedtls_net_context listen_fd, client_fd;
-    unsigned char buf[1024];
-    const char *pers = "dtlsproxy";
+    unsigned char buf[10000];
+    const char *pers = "goldy";
     char listen_host[100] = "";
     char listen_port[6] = "";
     char backend_host[100] = "";

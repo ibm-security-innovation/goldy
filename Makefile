@@ -26,8 +26,8 @@ ifdef ZLIB
 LOCAL_LDFLAGS += -lz
 endif
 
-APP = dtlsproxy
-OBJS = dtlsproxy.o
+APP = goldy
+OBJS = goldy.o
 
 TEST_APP = test/dtls_test_client
 TEST_OBJS = test/dtls_test_client.o
@@ -73,5 +73,5 @@ test/keys/test-proxy-key.pem:
 
 test/keys/test-proxy-cert.pem: test/keys/test-proxy-key.pem
 	$(MBEDTLS_INC_DIR)/../programs/x509/cert_write \
-		issuer_name="CN=dtlsproxy.local, O=Dummy Ltd, C=US" \
+		issuer_name="CN=goldy.local, O=Dummy Ltd, C=US" \
 		selfsign=1 issuer_key=$< output_file=$@
