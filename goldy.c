@@ -34,7 +34,9 @@
 #include <netdb.h>
 #include <getopt.h>
 
-int connect_to_udp_backend(const char *backend_host, const char* backend_port) {
+#include "goldy.h"
+
+static int connect_to_udp_backend(const char *backend_host, const char* backend_port) {
     struct addrinfo hints;
     struct addrinfo *result;
     struct addrinfo *rp;
@@ -75,25 +77,98 @@ int connect_to_udp_backend(const char *backend_host, const char* backend_port) {
     return sfd;
 }
 
-void print_usage(const char* argv0) {
-    printf("Usage: %s -l listen_host:port -b backend_host:port\n", argv0);
-    exit(1);
+static void print_version() {
+    printf("goldy %s\n", GOLDY_VERSION);
 }
 
-int main( int argc, char *argv[] )
-{
-    int ret, len, opt;
+static void print_usage() {
+    printf("Usage: goldy [-hv] -l listen_host:port -b backend_host:port\n"
+           "             -c cert_pem_file -k private_key_pem_file\n"
+           "\n"
+           "Options:\n"
+           "  -h, --help                 this help\n"
+           "  -v, --version              show version and exit\n"
+           "  -l, --listen=ADDR:PORT     listen for incoming DTLS on addr and UDP port\n"
+           "  -b, --backend=ADDR:PORT    proxy UDP traffic to addr and port\n"
+           "  -c, --cert=FILE            TLS certificate PEM filename\n"
+           "  -k, --key=FILE             TLS private key PEM filename\n");
+}
+
+/*
+ * Parse command line arguments.
+ *
+ * Returns 1 if all OK or 0 if there's a problem.
+ */
+static int get_options(int argc, char **argv, struct instance *gi) {
+    int opt;
     char* sep;
+    static const char* short_options = "hvb:l:c:k:";
+    static struct option long_options[] = {
+        {"help",    no_argument,       NULL, 'h'},
+        {"version", no_argument,       NULL, 'v'},
+        {"backend", required_argument, NULL, 'b'},
+        {"listen",  required_argument, NULL, 'l'},
+        {"cert",    required_argument, NULL, 'c'},
+        {"key",     required_argument, NULL, 'k'},
+        {0, 0, 0, 0}
+    };
+
+    memset(gi, 0, sizeof(*gi));
+
+    while ((opt = getopt_long(argc, argv, short_options, long_options, NULL)) != -1) {
+        switch (opt) {
+        case 'h': /* -h, --help */
+            print_usage();
+            exit(0);
+            break;
+        case 'v': /* -v, --version */
+            print_version();
+            exit(0);
+            break;
+        case 'b': /* -b, --backend=S */
+            sep = strchr(optarg, ':');
+            if (!sep) {
+                return 0;
+            }
+            *sep = '\0';
+            gi->backend_host = optarg;
+            gi->backend_port = sep + 1;
+            break;
+        case 'l': /* -l, --listen=S */
+            sep = strchr(optarg, ':');
+            if (!sep) {
+                return 0;
+            }
+            *sep = '\0';
+            gi->listen_host = optarg;
+            gi->listen_port = sep + 1;
+            break;
+        case 'c': /* -c, --cert=S */
+            gi->cert_file = optarg;
+            break;
+        case 'k': /* -k, --key=S */
+            gi->private_key_file = optarg;
+            break;
+        default: /* '?' */
+            return 0;
+        }
+    }
+
+    if (!(gi->listen_host && gi->listen_port &&
+          gi->backend_host && gi->backend_port &&
+          gi->cert_file && gi->private_key_file)) {
+        return 0;
+    }
+    return 1;
+}
+
+int main(int argc, char **argv) {
+    int ret, len;
     int backend_fd;
     mbedtls_net_context listen_fd, client_fd;
     unsigned char buf[10000];
     const char *pers = "goldy";
-    char listen_host[100] = "";
-    char listen_port[6] = "";
-    char backend_host[100] = "";
-    char backend_port[6] = "";
-    char cert_file[1024] = "";
-    char private_key_file[1024] = "";
+    struct instance gi;
     unsigned char client_ip[16] = { 0 };
     size_t cliip_len;
     mbedtls_ssl_cookie_ctx cookie_ctx;
@@ -109,42 +184,9 @@ int main( int argc, char *argv[] )
     mbedtls_ssl_cache_context cache;
 #endif
 
-    /* Parse command line */
-    while ((opt = getopt(argc, argv, "b:c:l:k:")) != -1) {
-        switch (opt) {
-        case 'b':
-            sep = strchr(optarg, ':');
-            if (!sep) {
-                print_usage(argv[0]);
-            }
-            *sep = '\0';
-            strncpy(backend_host, optarg, sizeof(backend_host));
-            strncpy(backend_port, sep + 1, sizeof(backend_port));
-            break;
-        case 'c':
-            strncpy(cert_file, optarg, sizeof(cert_file));
-            break;
-        case 'l':
-            sep = strchr(optarg, ':');
-            if (!sep) {
-                print_usage(argv[0]);
-            }
-            *sep = '\0';
-            strncpy(listen_host, optarg, sizeof(listen_host));
-            strncpy(listen_port, sep + 1, sizeof(listen_port));
-            break;
-        case 'k':
-            strncpy(private_key_file, optarg, sizeof(private_key_file));
-            break;
-        default: /* '?' */
-            print_usage(argv[0]);
-        }
-    }
-
-    if (!(listen_host[0] && listen_port[0] &&
-          backend_host[0] && backend_port[0] &&
-          cert_file[0] && private_key_file[0])) {
-        print_usage(argv[0]);
+    if (!get_options(argc, argv, &gi)) {
+        print_usage();
+        exit(1);
     }
 
     mbedtls_net_init( &listen_fd );
@@ -166,14 +208,14 @@ int main( int argc, char *argv[] )
     printf( "\n  . Loading the server cert. and key..." );
     fflush( stdout );
 
-    ret = mbedtls_x509_crt_parse_file(&srvcert, cert_file);
+    ret = mbedtls_x509_crt_parse_file(&srvcert, gi.cert_file);
     if( ret != 0 )
     {
         printf( " failed\n  !  mbedtls_x509_crt_parse returned %d\n\n", ret );
         goto exit;
     }
 
-    ret = mbedtls_pk_parse_keyfile(&pkey, private_key_file, NULL);
+    ret = mbedtls_pk_parse_keyfile(&pkey, gi.private_key_file, NULL);
     if( ret != 0 )
     {
         printf( " failed\n  !  mbedtls_pk_parse_key returned %d\n\n", ret );
@@ -185,10 +227,10 @@ int main( int argc, char *argv[] )
     /*
      * 2. Setup the "listening" UDP socket
      */
-    printf( "  . Bind on udp %s:%s ...", listen_host, listen_port );
+    printf( "  . Bind on udp %s:%s ...", gi.listen_host, gi.listen_port );
     fflush( stdout );
 
-    if( ( ret = mbedtls_net_bind( &listen_fd, listen_host, listen_port, MBEDTLS_NET_PROTO_UDP ) ) != 0 )
+    if( ( ret = mbedtls_net_bind( &listen_fd, gi.listen_host, gi.listen_port, MBEDTLS_NET_PROTO_UDP ) ) != 0 )
     {
         printf( " failed\n  ! mbedtls_net_bind returned %d\n\n", ret );
         goto exit;
@@ -390,9 +432,9 @@ reset:
     len = ret;
     printf( " %d bytes read\n\n%s\n\n", len, buf );
 
-    backend_fd = connect_to_udp_backend(backend_host, backend_port);
+    backend_fd = connect_to_udp_backend(gi.backend_host, gi.backend_port);
     ret = send(backend_fd, buf, len, 0);
-    printf("  %d bytes sent to backend server (%s:%s)\n", ret, backend_host, backend_port);
+    printf("  %d bytes sent to backend server (%s:%s)\n", ret, gi.backend_host, gi.backend_port);
 
     /* Wait for response */
     len = sizeof(buf) - 1;
