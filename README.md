@@ -14,6 +14,19 @@ To build goldy from source:
     make deps
     make
 
+## Help
+
+    Usage: goldy [-hv] -l listen_host:port -b backend_host:port
+                 -c cert_pem_file -k private_key_pem_file
+
+    Options:
+      -h, --help                 this help
+      -v, --version              show version and exit
+      -l, --listen=ADDR:PORT     listen for incoming DTLS on addr and port
+      -b, --backend=ADDR:PORT    proxy UDP traffic to addr and port
+      -c, --cert=FILE            TLS certificate PEM filename
+      -k, --key=FILE             TLS private key PEM filename
+
 ## Tests
 
 To compile the test client run the test suite:
