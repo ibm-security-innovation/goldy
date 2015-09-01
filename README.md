@@ -1,7 +1,8 @@
 # goldy
 
 **goldy** is lightweight [DTLS](https://en.wikipedia.org/wiki/Datagram_Transport_Layer_Security)
-proxy which allows adding DTLS encryption to UDP servers without modifying their code.
+proxy which allows adding DTLS encryption to UDP servers without modifying
+their code.
 
 goldy uses [mbed TLS](https://tls.mbed.org) to implement DTLS.
 
@@ -13,6 +14,9 @@ To build goldy from source:
     cd goldy
     make deps
     make
+
+Use `make V=1` for a verbose build output and `make DEBUG=1` to enable debug
+info (`-g3`).
 
 ## Help
 

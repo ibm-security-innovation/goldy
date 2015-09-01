@@ -92,8 +92,8 @@ failures=$((failures+$?))
 test_one_packet 3 "Medium packet" "123456789012345678901234567890123456789012345678901234567890"
 failures=$((failures+$?))
 
-big_packet=$(printf '%1200s') # 1200 spaces
-test_one_packet 4 "Big packet" "A${big_packet}Z"
+many_spaces=$(printf '%1200s') # 1200 spaces
+test_one_packet 4 "Big packet" "A${many_spaces}Z"
 failures=$((failures+$?))
 
 cleanup
