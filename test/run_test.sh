@@ -49,7 +49,7 @@ test_one_packet() {
   testnum=$1
   description=$2
   packet=$3
-  test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -b "$packet" > test/log/test_client.log
+  test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -b "$packet" > test/log/test_client.log 2>&1
 
   actual_line=$(grep 'bytes read' test/log/test_client.log)
 
@@ -68,11 +68,11 @@ test_one_packet() {
 trap handle_signal INT TERM HUP
 
 log "Starting goldy..."
-./goldy -l $GOLDYHOST:$GOLDYPORT -b $BACKENDHOST:$BACKENDPORT -c test/keys/test-proxy-cert.pem -k test/keys/test-proxy-key.pem > test/log/goldy.log &
+./goldy -l $GOLDYHOST:$GOLDYPORT -b $BACKENDHOST:$BACKENDPORT -c test/keys/test-proxy-cert.pem -k test/keys/test-proxy-key.pem > test/log/goldy.log 2>&1 &
 goldypid=$!
 
 log "Starting test UDP backend server..."
-test/udp_test_server.pl -b $BACKENDHOST:$BACKENDPORT > test/log/test_server.log &
+test/udp_test_server.pl -b $BACKENDHOST:$BACKENDPORT > test/log/test_server.log 2>&1 &
 backendpid=$!
 
 log "Waiting for goldy and backend server to start..."
