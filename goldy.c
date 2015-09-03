@@ -84,7 +84,7 @@ static void print_version() {
 }
 
 static void print_usage() {
-  printf("Usage: goldy [-hvd] -l listen_host:port -b backend_host:port\n"
+    printf("Usage: goldy [-hvd] -l listen_host:port -b backend_host:port\n"
            "             -c cert_pem_file -k private_key_pem_file\n"
            "\n"
            "Options:\n"
@@ -105,7 +105,7 @@ static void print_usage() {
 static int get_options(int argc, char **argv, struct instance *gi) {
     int opt;
     char* sep;
-  static const char* short_options = "hvdb:l:c:k:";
+    static const char* short_options = "hvdb:l:c:k:";
     static struct option long_options[] = {
         {"help",    no_argument,       NULL, 'h'},
         {"version", no_argument,       NULL, 'v'},
@@ -130,8 +130,8 @@ static int get_options(int argc, char **argv, struct instance *gi) {
             exit(0);
             break;
         case 'd': /* -d, --daemonize */
-          gi->daemonize = 1;
-          break;
+            gi->daemonize = 1;
+            break;
         case 'b': /* -b, --backend=S */
             sep = strchr(optarg, ':');
             if (!sep) {
@@ -202,7 +202,7 @@ int main(int argc, char **argv) {
     }
 
     if ( gi.daemonize ) {
-      daemonize(NULL,GOLDY_DAEMON_USER);
+        daemonize(NULL,GOLDY_DAEMON_USER);
     }
 
     mbedtls_net_init( &listen_fd );
@@ -222,94 +222,94 @@ int main(int argc, char **argv) {
 
     ret = mbedtls_x509_crt_parse_file(&srvcert, gi.cert_file);
     if( ret != 0 )
-    {
-        printf( " failed\n  !  mbedtls_x509_crt_parse returned %d\n\n", ret );
-        goto exit;
-    }
+        {
+            printf( " failed\n  !  mbedtls_x509_crt_parse returned %d\n\n", ret );
+            goto exit;
+        }
     log_debug("Loaded server certificate file");
 
     ret = mbedtls_pk_parse_keyfile(&pkey, gi.private_key_file, NULL);
     if( ret != 0 )
-    {
-        printf( " failed\n  !  mbedtls_pk_parse_key returned %d\n\n", ret );
-        goto exit;
-    }
+        {
+            printf( " failed\n  !  mbedtls_pk_parse_key returned %d\n\n", ret );
+            goto exit;
+        }
     log_debug("Loaded private key file");
 
     if( ( ret = mbedtls_net_bind( &listen_fd, gi.listen_host, gi.listen_port, MBEDTLS_NET_PROTO_UDP ) ) != 0 )
-    {
-        printf( " failed\n  ! mbedtls_net_bind returned %d\n\n", ret );
-        goto exit;
-    }
+        {
+            printf( " failed\n  ! mbedtls_net_bind returned %d\n\n", ret );
+            goto exit;
+        }
     log_debug("Binded UDP %s:%s", gi.listen_host, gi.listen_port);
 
     backend_fd = connect_to_udp_backend(gi.backend_host, gi.backend_port);
     log_debug("Created socket to backend UDP %s:%s", gi.backend_host, gi.backend_port);
 
     if( ( ret = mbedtls_ctr_drbg_seed( &ctr_drbg, mbedtls_entropy_func, &entropy,
-                               (const unsigned char *) pers,
-                               strlen( pers ) ) ) != 0 )
-    {
-        printf( " failed\n  ! mbedtls_ctr_drbg_seed returned %d\n", ret );
-        goto exit;
-    }
+                                       (const unsigned char *) pers,
+                                       strlen( pers ) ) ) != 0 )
+        {
+            printf( " failed\n  ! mbedtls_ctr_drbg_seed returned %d\n", ret );
+            goto exit;
+        }
     log_debug("Seeded random number generator");
 
     if( ( ret = mbedtls_ssl_config_defaults( &conf,
-                    MBEDTLS_SSL_IS_SERVER,
-                    MBEDTLS_SSL_TRANSPORT_DATAGRAM,
-                    MBEDTLS_SSL_PRESET_DEFAULT ) ) != 0 )
-    {
-        mbedtls_printf( " failed\n  ! mbedtls_ssl_config_defaults returned %d\n\n", ret );
-        goto exit;
-    }
+                                             MBEDTLS_SSL_IS_SERVER,
+                                             MBEDTLS_SSL_TRANSPORT_DATAGRAM,
+                                             MBEDTLS_SSL_PRESET_DEFAULT ) ) != 0 )
+        {
+            mbedtls_printf( " failed\n  ! mbedtls_ssl_config_defaults returned %d\n\n", ret );
+            goto exit;
+        }
 
     mbedtls_ssl_conf_rng( &conf, mbedtls_ctr_drbg_random, &ctr_drbg );
 
 #if defined(MBEDTLS_SSL_CACHE_C)
     mbedtls_ssl_conf_session_cache( &conf, &cache,
-                                   mbedtls_ssl_cache_get,
-                                   mbedtls_ssl_cache_set );
+                                    mbedtls_ssl_cache_get,
+                                    mbedtls_ssl_cache_set );
 #endif
 
     mbedtls_ssl_conf_ca_chain( &conf, srvcert.next, NULL );
     if( ( ret = mbedtls_ssl_conf_own_cert( &conf, &srvcert, &pkey ) ) != 0 )
-    {
-        printf( " failed\n  ! mbedtls_ssl_conf_own_cert returned %d\n\n", ret );
-        goto exit;
-    }
+        {
+            printf( " failed\n  ! mbedtls_ssl_conf_own_cert returned %d\n\n", ret );
+            goto exit;
+        }
 
     if( ( ret = mbedtls_ssl_cookie_setup( &cookie_ctx,
-                                  mbedtls_ctr_drbg_random, &ctr_drbg ) ) != 0 )
-    {
-        printf( " failed\n  ! mbedtls_ssl_cookie_setup returned %d\n\n", ret );
-        goto exit;
-    }
+                                          mbedtls_ctr_drbg_random, &ctr_drbg ) ) != 0 )
+        {
+            printf( " failed\n  ! mbedtls_ssl_cookie_setup returned %d\n\n", ret );
+            goto exit;
+        }
 
     mbedtls_ssl_conf_dtls_cookies( &conf, mbedtls_ssl_cookie_write, mbedtls_ssl_cookie_check,
-                               &cookie_ctx );
+                                   &cookie_ctx );
 
     if( ( ret = mbedtls_ssl_setup( &ssl, &conf ) ) != 0 )
-    {
-        printf( " failed\n  ! mbedtls_ssl_setup returned %d\n\n", ret );
-        goto exit;
-    }
+        {
+            printf( " failed\n  ! mbedtls_ssl_setup returned %d\n\n", ret );
+            goto exit;
+        }
 
     mbedtls_ssl_set_timer_cb( &ssl, &timer, mbedtls_timing_set_delay,
-                                            mbedtls_timing_get_delay );
+                              mbedtls_timing_get_delay );
 
     log_debug("Set DTLS parameters");
 
     log_info("Proxy is ready, listening for connections on UDP %s:%s", gi.listen_host, gi.listen_port);
 
-reset:
+ reset:
 #ifdef MBEDTLS_ERROR_C
     if( ret != 0 )
-    {
-        char error_buf[100];
-        mbedtls_strerror(ret, error_buf, sizeof(error_buf));
-        log_error("(reset) Last error was: %d - %s", ret, error_buf);
-    }
+        {
+            char error_buf[100];
+            mbedtls_strerror(ret, error_buf, sizeof(error_buf));
+            log_error("(reset) Last error was: %d - %s", ret, error_buf);
+        }
 #endif
 
     mbedtls_net_free( &client_fd );
@@ -317,11 +317,11 @@ reset:
     mbedtls_ssl_session_reset( &ssl );
 
     if( ( ret = mbedtls_net_accept( &listen_fd, &client_fd,
-                    client_ip, sizeof( client_ip ), &cliip_len ) ) != 0 )
-    {
-        printf( " failed\n  ! mbedtls_net_accept returned %d\n\n", ret );
-        goto exit;
-    }
+                                    client_ip, sizeof( client_ip ), &cliip_len ) ) != 0 )
+        {
+            printf( " failed\n  ! mbedtls_net_accept returned %d\n\n", ret );
+            goto exit;
+        }
 
     {
         union sockaddr_u {
@@ -350,12 +350,12 @@ reset:
 
     /* For HelloVerifyRequest cookies */
     if( ( ret = mbedtls_ssl_set_client_transport_id( &ssl,
-                    client_ip, cliip_len ) ) != 0 )
-    {
-        printf( " failed\n  ! "
-                "mbedtls_ssl_set_client_transport_id() returned -0x%x\n\n", -ret );
-        goto exit;
-    }
+                                                     client_ip, cliip_len ) ) != 0 )
+        {
+            printf( " failed\n  ! "
+                    "mbedtls_ssl_set_client_transport_id() returned -0x%x\n\n", -ret );
+            goto exit;
+        }
 
     mbedtls_ssl_set_bio( &ssl, &client_fd,
                          mbedtls_net_send, mbedtls_net_recv, mbedtls_net_recv_timeout );
@@ -365,18 +365,18 @@ reset:
            ret == MBEDTLS_ERR_SSL_WANT_WRITE );
 
     if( ret == MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED )
-    {
-        log_debug("(%s:%d) DTLS handshake requested hello verification", client_ip_str, client_port);
-        ret = 0;
-        goto reset;
-    }
+        {
+            log_debug("(%s:%d) DTLS handshake requested hello verification", client_ip_str, client_port);
+            ret = 0;
+            goto reset;
+        }
     else if( ret != 0 )
-    {
-        char error_buf[100];
-        mbedtls_strerror(ret, error_buf, sizeof(error_buf));
-        log_error("(%s:%d) DTLS handshake failed: %s (%d)", client_ip_str, client_port, error_buf, ret);
-        goto reset;
-    }
+        {
+            char error_buf[100];
+            mbedtls_strerror(ret, error_buf, sizeof(error_buf));
+            log_error("(%s:%d) DTLS handshake failed: %s (%d)", client_ip_str, client_port, error_buf, ret);
+            goto reset;
+        }
 
     log_debug("(%s:%d) DTLS handshake done", client_ip_str, client_port);
 
@@ -388,23 +388,23 @@ reset:
            ret == MBEDTLS_ERR_SSL_WANT_WRITE );
 
     if( ret <= 0 )
-    {
-        switch( ret )
         {
-            case MBEDTLS_ERR_SSL_TIMEOUT:
-                printf( " timeout\n\n" );
-                goto reset;
+            switch( ret )
+                {
+                case MBEDTLS_ERR_SSL_TIMEOUT:
+                    printf( " timeout\n\n" );
+                    goto reset;
 
-            case MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY:
-                printf( " connection was closed gracefully\n" );
-                ret = 0;
-                goto close_notify;
+                case MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY:
+                    printf( " connection was closed gracefully\n" );
+                    ret = 0;
+                    goto close_notify;
 
-            default:
-                printf( " mbedtls_ssl_read returned -0x%x\n\n", -ret );
-                goto reset;
+                default:
+                    printf( " mbedtls_ssl_read returned -0x%x\n\n", -ret );
+                    goto reset;
+                }
         }
-    }
 
     len = ret;
     log_debug("(%s:%d) %d bytes read from DTLS socket", client_ip_str, client_port, len);
@@ -424,15 +424,15 @@ reset:
            ret == MBEDTLS_ERR_SSL_WANT_WRITE );
 
     if( ret < 0 )
-    {
-        printf( " failed\n  ! mbedtls_ssl_write returned %d\n\n", ret );
-        goto exit;
-    }
+        {
+            printf( " failed\n  ! mbedtls_ssl_write returned %d\n\n", ret );
+            goto exit;
+        }
 
     len = ret;
     log_debug("(%s:%d) %d bytes written to DTLS socket", client_ip_str, client_port, len);
 
-close_notify:
+ close_notify:
 
     /* No error checking, the connection might be closed already */
     do ret = mbedtls_ssl_close_notify( &ssl );
@@ -447,15 +447,15 @@ close_notify:
 
     goto reset;
 
-exit:
+ exit:
 
 #ifdef MBEDTLS_ERROR_C
     if( ret != 0 )
-    {
-        char error_buf[100];
-        mbedtls_strerror( ret, error_buf, 100 );
-        log_error("(exit) Last error was: %d - %s", ret, error_buf);
-    }
+        {
+            char error_buf[100];
+            mbedtls_strerror( ret, error_buf, 100 );
+            log_error("(exit) Last error was: %d - %s", ret, error_buf);
+        }
 #endif
 
     if (backend_fd > 0) {
