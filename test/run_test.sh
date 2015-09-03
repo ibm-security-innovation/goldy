@@ -1,9 +1,48 @@
-#!/bin/sh
+#!/bin/bash
 
 GOLDYHOST=127.0.0.1
 GOLDYPORT=29501
 BACKENDHOST=127.0.0.1
 BACKENDPORT=29502
+
+usage() {
+	  cat << EOF
+usage: $0 options
+
+Runs the goldy test suite
+
+OPTIONS:
+   -h/?    Show this message
+   -l      keep log files after running
+   -k      kill processes using pkill
+EOF
+
+}
+
+keep_log_files=0
+pkill_processes=0
+
+while getopts "kl" OPTION
+do
+    case $OPTION in
+        l)
+            keep_log_files=1
+			      echo "Keeping log files"
+            ;;
+        k)
+            pkill_processes=1
+			      echo "Will use pkill"
+            ;;
+        h)
+            usage
+            exit 1
+            ;;
+        ?)
+            usage
+            exit
+            ;;
+    esac
+done
 
 goldypid=
 backendpid=
@@ -16,15 +55,23 @@ log() {
 
 kill_goldy() {
   log "Killing goldy (PID $goldypid)"
-  kill $goldypid
-  wait $goldypid
+  if [ $pkill_processes ] ; then
+    pkill goldy
+  else
+    kill $goldypid
+    wait $goldypid
+  fi
   goldypid=
 }
 
 kill_backend() {
   log "Killing backend test server (PID $backendpid)"
-  kill $backendpid
-  wait $backendpid
+  if [ $pkill_processes ] ; then
+    pkill -f udp_test_server.pl
+  else
+    kill $backendpid
+    wait $backendpid
+  fi
   backendpid=
 }
 
@@ -35,7 +82,9 @@ cleanup() {
   if [ -n "$backendpid" ] ; then
     kill_backend
   fi
-  rm -f test/log/*.log
+  if [ $keep_log_files != 1 ]; then
+    rm -f test/log/*.log
+  fi
 }
 
 handle_signal() {
@@ -49,7 +98,7 @@ test_one_packet() {
   testnum=$1
   description=$2
   packet=$3
-  test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -b "$packet" > test/log/test_client.log
+  test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -b "$packet" > test/log/test_client.log 2>&1
 
   actual_line=$(grep 'bytes read' test/log/test_client.log)
 
@@ -68,11 +117,11 @@ test_one_packet() {
 trap handle_signal INT TERM HUP
 
 log "Starting goldy..."
-./goldy -l $GOLDYHOST:$GOLDYPORT -b $BACKENDHOST:$BACKENDPORT -c test/keys/test-proxy-cert.pem -k test/keys/test-proxy-key.pem > test/log/goldy.log &
+./goldy -l $GOLDYHOST:$GOLDYPORT -b $BACKENDHOST:$BACKENDPORT -c test/keys/test-proxy-cert.pem -k test/keys/test-proxy-key.pem > test/log/goldy.log 2>&1 &
 goldypid=$!
 
 log "Starting test UDP backend server..."
-test/udp_test_server.pl -b $BACKENDHOST:$BACKENDPORT > test/log/test_server.log &
+test/udp_test_server.pl -b $BACKENDHOST:$BACKENDPORT > test/log/test_server.log 2>&1 &
 backendpid=$!
 
 log "Waiting for goldy and backend server to start..."
