@@ -27,7 +27,7 @@ LOCAL_LDFLAGS += -lz
 endif
 
 APP = goldy
-OBJS = goldy.o
+OBJS = goldy.o daemonize.o
 
 TEST_APP = test/dtls_test_client
 TEST_OBJS = test/dtls_test_client.o
