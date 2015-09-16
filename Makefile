@@ -1,5 +1,5 @@
-MBEDTLS_INC_DIR ?= deps/mbedtls-2.0.0/include
-MBEDTLS_LIB_DIR ?= deps/mbedtls-2.0.0/library
+MBEDTLS_INC_DIR ?= deps/mbedtls-2.1.0/include
+MBEDTLS_LIB_DIR ?= deps/mbedtls-2.1.0/library
 
 CFLAGS ?= -O2
 WARNING_CFLAGS ?= -Wall -W -Wdeclaration-after-statement
