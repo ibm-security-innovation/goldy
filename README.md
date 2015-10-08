@@ -42,3 +42,12 @@ To compile the test client run the test suite:
 Copyright TODO
 
 See the LICENSE file.
+
+
+## Dependencies & 3rd Party
+
+### mbedtls
+
+### libev
+
+Code from https://github.com/errordeveloper/contrib-libev-examples was used
