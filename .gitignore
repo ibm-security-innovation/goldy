@@ -3,3 +3,4 @@
 /test/dtls_test_client
 /test/*.o
 /deps/mbedtls-*
+/deps/libev-*
