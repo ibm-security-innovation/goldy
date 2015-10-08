@@ -170,7 +170,7 @@ static int get_options(int argc, char **argv, struct instance *gi) {
   return 1;
 }
 
-static void check_return_code(int ret,const char* label) {
+static int check_return_code(int ret,const char* label) {
 #ifdef MBEDTLS_ERROR_C
   if( ret != 0 )
     {
@@ -179,6 +179,7 @@ static void check_return_code(int ret,const char* label) {
       log_error("(%s) Last error was: %d - %s", label, ret, error_buf);
     }
 #endif
+  return ret;
 }
 
 typedef struct {
@@ -309,7 +310,10 @@ static int global_init(const struct instance *gi, global_context *gc) {
  exit:
   check_return_code(ret,"global_init - exit");
 
-  global_deinit(gc);
+  if ( ret!=0 )
+    {
+      global_deinit(gc);
+    }
   return ret == 0 ? 0 : 1;
 }
 
@@ -354,7 +358,10 @@ static int per_client_init(const global_context *gc,per_client_context *pcc) {
 
  exit:
   check_return_code(ret,"per_client_init - exit");
-  per_client_deinit(pcc);
+  if ( ret!=0 )
+    {
+      per_client_deinit(pcc);
+    }
   return ret == 0 ? 0 : 1;
 }
 
@@ -532,6 +539,7 @@ int main(int argc, char **argv) {
 
  exit:
   check_return_code(ret,"main - exit");
+  per_client_deinit(&pcc);
   global_deinit(&gc);
   return ret == 0 ? 0 : 1;
 }
