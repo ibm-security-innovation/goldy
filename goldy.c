@@ -183,7 +183,6 @@ static int check_return_code(int ret,const char* label) {
 }
 
 typedef struct {
-  int backend_fd;
   mbedtls_ssl_cookie_ctx cookie_ctx;
   mbedtls_net_context listen_fd;
   mbedtls_entropy_context entropy;
@@ -198,11 +197,6 @@ typedef struct {
 
 static int global_deinit(global_context *gc) {
   int ret = 0;
-
-  if (gc->backend_fd > 0) {
-    shutdown(gc->backend_fd, SHUT_RDWR);
-    close(gc->backend_fd);
-  }
 
   mbedtls_net_free( &gc->listen_fd );
 
@@ -260,9 +254,6 @@ static int global_init(const struct instance *gi, global_context *gc) {
     }
   log_debug("Binded UDP %s:%s", gi->listen_host, gi->listen_port);
 
-  gc->backend_fd = connect_to_udp_backend(gi->backend_host, gi->backend_port);
-  log_debug("Created socket to backend UDP %s:%s", gi->backend_host, gi->backend_port);
-
   if( ( ret = mbedtls_ctr_drbg_seed( &gc->ctr_drbg, mbedtls_entropy_func, &gc->entropy,
                                      (const unsigned char *) pers,
                                      strlen( pers ) ) ) != 0 )
@@ -319,6 +310,7 @@ static int global_init(const struct instance *gi, global_context *gc) {
 
 typedef struct {
   mbedtls_net_context client_fd;
+  int backend_fd;
   mbedtls_ssl_context ssl;
   mbedtls_timing_delay_context timer;
   unsigned char client_ip[16];
@@ -330,17 +322,25 @@ typedef struct {
 
 
 static int per_client_deinit(per_client_context *pcc) {
+  if (pcc->backend_fd > 0) {
+    shutdown(pcc->backend_fd, SHUT_RDWR);
+    close(pcc->backend_fd);
+  }
+
   mbedtls_net_free( &pcc->client_fd );
   mbedtls_ssl_free( &pcc->ssl );
   return 0;
 }
 
 static void per_client_reset(per_client_context *pcc) {
+  /* the name is misleading - net_free actually shutdown/close the socket but doesn'tfree any resources,
+     hence it can be called repeatedly, even without net_init (which actually does nothing other than set the fd
+     to -1. */
   mbedtls_net_free( &pcc->client_fd );
   mbedtls_ssl_session_reset( &pcc->ssl );
 }
 
-static int per_client_init(const global_context *gc,per_client_context *pcc) {
+static int per_client_init(const struct instance *gi,const global_context *gc,per_client_context *pcc) {
   int ret;
   memset(pcc, 0, sizeof(*pcc));
   mbedtls_net_init( &pcc->client_fd );
@@ -355,6 +355,14 @@ static int per_client_init(const global_context *gc,per_client_context *pcc) {
   mbedtls_ssl_set_timer_cb( &pcc->ssl, &pcc->timer, mbedtls_timing_set_delay,
                             mbedtls_timing_get_delay );
 
+  pcc->backend_fd = connect_to_udp_backend(gi->backend_host, gi->backend_port);
+  if ( pcc->backend_fd==-1 )
+    {
+      ret = MBEDTLS_ERR_NET_CONNECT_FAILED; /* piggybacking the mbedtls error space for the sake of cleaner code */
+      goto exit;
+    }
+  log_debug("Created socket to backend UDP %s:%s", gi->backend_host, gi->backend_port);
+
 
  exit:
   check_return_code(ret,"per_client_init - exit");
@@ -363,6 +371,30 @@ static int per_client_init(const global_context *gc,per_client_context *pcc) {
       per_client_deinit(pcc);
     }
   return ret == 0 ? 0 : 1;
+}
+
+static void acquire_peername(per_client_context *pcc) {
+  union sockaddr_u {
+    struct sockaddr_storage storage;
+    struct sockaddr_in in;
+    struct sockaddr_in6 in6;
+    struct sockaddr sockaddr;
+  } addr;
+  socklen_t addrlen = sizeof(addr.storage);
+
+  getpeername(pcc->client_fd.fd, &addr.sockaddr, &addrlen);
+
+  /* deal with both IPv4 and IPv6: */
+  if (addr.storage.ss_family == AF_INET) {
+    struct sockaddr_in *s_ip4 = &addr.in;
+    pcc->client_port = ntohs(s_ip4->sin_port);
+    inet_ntop(AF_INET, &s_ip4->sin_addr, pcc->client_ip_str, sizeof(pcc->client_ip_str));
+  } else {
+    struct sockaddr_in6 *s_ip6 = &addr.in6;
+    pcc->client_port = ntohs(s_ip6->sin6_port);
+    inet_ntop(AF_INET6, &s_ip6->sin6_addr, pcc->client_ip_str, sizeof(pcc->client_ip_str));
+  }
+
 }
 
 static int main_loop(const struct instance *gi,global_context *gc,per_client_context *pcc) {
@@ -380,30 +412,8 @@ static int main_loop(const struct instance *gi,global_context *gc,per_client_con
       goto exit;
     }
 
-  {
-    union sockaddr_u {
-      struct sockaddr_storage storage;
-      struct sockaddr_in in;
-      struct sockaddr_in6 in6;
-      struct sockaddr sockaddr;
-    } addr;
-    socklen_t addrlen = sizeof(addr.storage);
-
-    getpeername(pcc->client_fd.fd, &addr.sockaddr, &addrlen);
-
-    /* deal with both IPv4 and IPv6: */
-    if (addr.storage.ss_family == AF_INET) {
-      struct sockaddr_in *s_ip4 = &addr.in;
-      pcc->client_port = ntohs(s_ip4->sin_port);
-      inet_ntop(AF_INET, &s_ip4->sin_addr, pcc->client_ip_str, sizeof(pcc->client_ip_str));
-    } else {
-      struct sockaddr_in6 *s_ip6 = &addr.in6;
-      pcc->client_port = ntohs(s_ip6->sin6_port);
-      inet_ntop(AF_INET6, &s_ip6->sin6_addr, pcc->client_ip_str, sizeof(pcc->client_ip_str));
-    }
-
-    log_info("(%s:%d) Received connection", pcc->client_ip_str, pcc->client_port);
-  }
+  acquire_peername(pcc);
+  log_info("(%s:%d) Received connection", pcc->client_ip_str, pcc->client_port);
 
   /* For HelloVerifyRequest cookies */
   if( ( ret = mbedtls_ssl_set_client_transport_id( &pcc->ssl,
@@ -466,14 +476,14 @@ static int main_loop(const struct instance *gi,global_context *gc,per_client_con
   len = ret;
   log_debug("(%s:%d) %d bytes read from DTLS socket", pcc->client_ip_str, pcc->client_port, len);
 
-  ret = send(gc->backend_fd, buf, len, 0);
+  ret = send(pcc->backend_fd, buf, len, 0);
   log_debug("(%s:%d) %d bytes sent to backend server (%s:%s)", pcc->client_ip_str, pcc->client_port, ret,
             gi->backend_host, gi->backend_port);
 
   /* Wait for response */
   len = sizeof(buf) - 1;
   memset(buf, 0, sizeof(buf));
-  ret = recv(gc->backend_fd, buf, len, 0);
+  ret = recv(pcc->backend_fd, buf, len, 0);
   log_debug("(%s:%d) %d bytes received from backend server", pcc->client_ip_str, pcc->client_port, ret);
 
   len = ret;
@@ -533,7 +543,7 @@ int main(int argc, char **argv) {
       goto exit;
     }
 
-  per_client_init(&gc,&pcc);
+  per_client_init(&gi,&gc,&pcc);
 
   main_loop(&gi,&gc,&pcc);
 
