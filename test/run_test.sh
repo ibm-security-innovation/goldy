@@ -15,14 +15,17 @@ OPTIONS:
    -h/?    Show this message
    -l      keep log files after running
    -k      kill processes using pkill
+   -s      skip log (keep stderr)
 EOF
 
 }
 
 keep_log_files=0
 pkill_processes=0
+keep_stderr=0
+keep_test_client_stderr=0
 
-while getopts "kl" OPTION
+while getopts "klst" OPTION
 do
     case $OPTION in
         l)
@@ -32,6 +35,14 @@ do
         k)
             pkill_processes=1
 			      echo "Will use pkill"
+            ;;
+        s)
+            keep_stderr=1
+			      echo "Will not capture stderr"
+            ;;
+        t)
+            keep_test_client_stderr=1
+			      echo "Will not capture stderr for test client(s)"
             ;;
         h)
             usage
@@ -98,7 +109,14 @@ test_one_packet() {
   testnum=$1
   description=$2
   packet=$3
-  test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -b "$packet" > test/log/test_client.log 2>&1
+
+  if [ $keep_test_client_stderr == 1 ]; then
+    test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -b "$packet"
+  else
+      test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -b "$packet" > test/log/test_client.log 2>&1
+  fi
+
+
 
   actual_line=$(grep 'bytes read' test/log/test_client.log)
 
@@ -117,7 +135,14 @@ test_one_packet() {
 trap handle_signal INT TERM HUP
 
 log "Starting goldy..."
-./goldy -l $GOLDYHOST:$GOLDYPORT -b $BACKENDHOST:$BACKENDPORT -c test/keys/test-proxy-cert.pem -k test/keys/test-proxy-key.pem > test/log/goldy.log 2>&1 &
+redirect_line=""
+if [ $keep_stderr == 1 ]; then
+  ./goldy -g DEBUG -l $GOLDYHOST:$GOLDYPORT -b $BACKENDHOST:$BACKENDPORT -c test/keys/test-proxy-cert.pem -k test/keys/test-proxy-key.pem &
+else
+  ./goldy -g DEBUG -l $GOLDYHOST:$GOLDYPORT -b $BACKENDHOST:$BACKENDPORT -c test/keys/test-proxy-cert.pem -k test/keys/test-proxy-key.pem > test/log/goldy.log 2>&1 &
+fi
+
+
 goldypid=$!
 
 log "Starting test UDP backend server..."

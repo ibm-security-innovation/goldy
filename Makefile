@@ -1,13 +1,16 @@
 MBEDTLS_INC_DIR ?= deps/mbedtls-2.1.0/include
 MBEDTLS_LIB_DIR ?= deps/mbedtls-2.1.0/library
+LIBEV_INC_DIR ?= deps/libev-4.20
+LIBEV_LIB_DIR ?= deps/libev-4.20
 
-CFLAGS ?= -O2
+CFLAGS ?= -g
 WARNING_CFLAGS ?= -Wall -W -Wdeclaration-after-statement
 LDFLAGS ?=
 
-LOCAL_CFLAGS = $(WARNING_CFLAGS) -I$(MBEDTLS_INC_DIR) -D_FILE_OFFSET_BITS=64
+LOCAL_CFLAGS = $(WARNING_CFLAGS) -I$(MBEDTLS_INC_DIR) -I$(LIBEV_INC_DIR) -D_FILE_OFFSET_BITS=64
 MBEDTLS_LIBS = $(MBEDTLS_LIB_DIR)/libmbedtls.a $(MBEDTLS_LIB_DIR)/libmbedx509.a $(MBEDTLS_LIB_DIR)/libmbedcrypto.a
 MBEDTLS_CONFIG_INC = $(MBEDTLS_INC_DIR)/mbedtls/config.h
+LIBEV_LIBS = $(LIBEV_LIB_DIR)/.libs/libev.a
 
 ifdef DEBUG
 LOCAL_CFLAGS += -g3
@@ -36,7 +39,7 @@ TEST_OBJS = test/dtls_test_client.o
 
 all: $(APP)
 
-$(APP): $(OBJS) $(MBEDTLS_LIBS)
+$(APP): $(OBJS) $(MBEDTLS_LIBS) $(LIBEV_LIBS)
 	$(LINK) -o $@ $^
 
 $(TEST_APP): $(TEST_OBJS) $(MBEDTLS_LIBS)
