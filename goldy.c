@@ -21,7 +21,7 @@
 #include "mbedtls/timing.h"
 
 #if defined(MBEDTLS_SSL_CACHE_C)
-#include "mbedtls/ssl_cache.h"
+# include "mbedtls/ssl_cache.h"
 #endif
 
 #include "ev.h"
@@ -31,55 +31,13 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <arpa/inet.h>
-#include <netdb.h>
 #include <getopt.h>
 
 #include "goldy.h"
 #include "daemonize.h"
 #include "log.h"
 
-static int connect_to_udp_backend(const char *backend_host, const char* backend_port) {
-  struct addrinfo hints;
-  struct addrinfo *result;
-  struct addrinfo *rp;
-  int ret, sfd;
-
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_INET;
-  hints.ai_socktype = SOCK_DGRAM;
-  hints.ai_flags = 0;
-  hints.ai_protocol = 0;
-
-  ret = getaddrinfo(backend_host, backend_port, &hints, &result);
-  if (ret != 0) {
-    fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(ret));
-    exit(EXIT_FAILURE);
-  }
-
-  for (rp = result; rp; rp = rp->ai_next) {
-    sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-    if (sfd == -1) {
-      continue;
-    }
-
-    if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1) {
-      break; /* Success */
-    }
-
-    close(sfd);
-  }
-
-  freeaddrinfo(result);
-
-  if (!rp) {
-    printf("failed: could not connect to UDP backend\n");
-    return -1;
-  }
-
-  return sfd;
-}
 
 static void print_version() {
   printf("goldy %s\n", GOLDY_VERSION);
@@ -332,16 +290,17 @@ static int global_init(const struct instance *gi, global_context *gc) {
 typedef enum {
   GOLDY_STEP_CLIENT_HANDSHAKE = 0,
   GOLDY_STEP_CLIENT_READ,
+  GOLDY_STEP_CLIENT_SEND_BACKEND,
+  GOLDY_STEP_CLIENT_RECEIVE_BACKEND,
   GOLDY_STEP_CLIENT_WRITE,
   GOLDY_STEP_CLIENT_CLOSE_NOTIFY,
-  GOLDY_STEP_CLIENT_DESTRUCT,
   GOLDY_STEP_CLIENT_LAST,
 } client_step;
 
 typedef struct {
   const struct instance* options;
   mbedtls_net_context client_fd;
-  int backend_fd;
+  mbedtls_net_context backend_fd;
   mbedtls_ssl_context ssl;
   mbedtls_timing_delay_context timer;
   unsigned char client_ip[16];
@@ -355,11 +314,7 @@ typedef struct {
 } per_client_context;
 
 static int per_client_deinit(per_client_context *pcc) {
-  if (pcc->backend_fd > 0) {
-    shutdown(pcc->backend_fd, SHUT_RDWR);
-    close(pcc->backend_fd);
-  }
-
+  mbedtls_net_free( &pcc->backend_fd );
   mbedtls_net_free( &pcc->client_fd );
   mbedtls_ssl_free( &pcc->ssl );
   return 0;
@@ -378,6 +333,7 @@ static int per_client_init(const global_context *gc,per_client_context *pcc,cons
   memcpy(&pcc->client_ip,client_ip,cliip_len);
   pcc->cliip_len = cliip_len;
   mbedtls_ssl_init( &pcc->ssl );
+  mbedtls_net_init(&pcc->backend_fd);
   pcc->step = GOLDY_STEP_CLIENT_HANDSHAKE;
   pcc->options = gc->options;
 
@@ -495,15 +451,14 @@ static void per_client_step_handshake(EV_P_ ev_io *w,per_client_context* pcc) {
   case 0:
     {
       log_debug("(%s:%d) DTLS handshake done", pcc->client_ip_str, pcc->client_port);
-      pcc->backend_fd = connect_to_udp_backend(pcc->options->backend_host, pcc->options->backend_port);
-      if ( pcc->backend_fd==-1 )
+      ret = mbedtls_net_connect(&pcc->backend_fd,pcc->options->backend_host, pcc->options->backend_port,MBEDTLS_NET_PROTO_UDP);
+      if ( ret !=0 )
         {
-          /* piggybacking the mbedtls error space for the sake of cleaner code */
-          per_client_report_error(MBEDTLS_ERR_NET_CONNECT_FAILED,pcc,"ssl handshake");
+          per_client_report_error(ret,pcc,"ssl handshake");
           return per_client_defer_destruct(loop,w,pcc);
         }
+      mbedtls_net_set_nonblock(&pcc->backend_fd);
       log_info("Created socket to backend UDP %s:%s", pcc->options->backend_host, pcc->options->backend_port);
-
 
       pcc->step = GOLDY_STEP_CLIENT_READ;
       return;
@@ -542,7 +497,7 @@ static void per_client_step_read(EV_P_ ev_io *w,per_client_context* pcc) {
     {
       per_client_report_error(ret,pcc,"per_client_cb - gracefully closed");
       pcc->step = GOLDY_STEP_CLIENT_CLOSE_NOTIFY;
-      return per_client_defer_destruct(loop,w,pcc);
+      return;
     }
 
   default:
@@ -555,25 +510,43 @@ static void per_client_step_read(EV_P_ ev_io *w,per_client_context* pcc) {
       {
         pcc->len = ret;
         log_debug("(%s:%d) %d bytes read from DTLS socket", pcc->client_ip_str, pcc->client_port, ret);
-
-        ret = send(pcc->backend_fd, pcc->buf, pcc->len, 0);
-        /* TODO - better error handling */
-        log_debug("(%s:%d) %d bytes sent to backend server", pcc->client_ip_str, pcc->client_port, ret);
-
-        /* Wait for response */
-        pcc->len = sizeof(pcc->buf) - 1;
-        memset(pcc->buf, 0, sizeof(pcc->buf));
-        ret = recv(pcc->backend_fd, pcc->buf, pcc->len, 0);
-        log_debug("(%s:%d) %d bytes received from backend server", pcc->client_ip_str, pcc->client_port, ret);
-        /* TODO - better error handling */
-        /* ev_io_stop(EV_A_ &pcc->client_fd.fd);*/
-        pcc->len = ret;
-        pcc->step = GOLDY_STEP_CLIENT_WRITE;
-        ev_invoke(loop,w,EV_NONE);
+        pcc->step = GOLDY_STEP_CLIENT_SEND_BACKEND;
         return;
       }
   }
 }
+
+static void per_client_step_send_backend(EV_P_ ev_io *w,per_client_context* pcc) {
+  int ret = mbedtls_net_send(&pcc->backend_fd, pcc->buf, pcc->len);
+  if ( ret==MBEDTLS_ERR_SSL_WANT_WRITE ) {
+    return;
+  }
+  if ( ret<0 ) {
+    per_client_report_error(ret,pcc,"per_client_step_send_backend");
+    return per_client_defer_destruct(loop,w,pcc);
+  }
+  log_debug("(%s:%d) %d bytes sent to backend server", pcc->client_ip_str, pcc->client_port, ret);
+  pcc->step = GOLDY_STEP_CLIENT_RECEIVE_BACKEND;
+  return;
+}
+
+static void per_client_step_receive_backend(EV_P_ ev_io *w,per_client_context* pcc) {
+  int ret;
+  pcc->len = sizeof(pcc->buf) - 1;
+  memset(pcc->buf, 0, sizeof(pcc->buf));
+  ret = mbedtls_net_recv(&pcc->backend_fd, pcc->buf, pcc->len);
+  if ( ret==MBEDTLS_ERR_SSL_WANT_READ ) {
+    return;
+  }
+  if ( ret<0 ) {
+    per_client_report_error(ret,pcc,"per_client_step_send_backend");
+    return per_client_defer_destruct(loop,w,pcc);
+  }
+  log_debug("(%s:%d) %d bytes received from backend server", pcc->client_ip_str, pcc->client_port, ret);
+  pcc->len = ret;
+  pcc->step = GOLDY_STEP_CLIENT_WRITE;
+}
+
 
 static void per_client_step_write(EV_P_ ev_io *w,per_client_context* pcc) {
   int ret = mbedtls_ssl_write(&pcc->ssl, pcc->buf, pcc->len);
@@ -616,6 +589,8 @@ typedef void (*per_client_step)(EV_P_ ev_io *w,per_client_context* pcc);
 static per_client_step per_client_callbacks[GOLDY_STEP_CLIENT_LAST] = {
   per_client_step_handshake,
   per_client_step_read,
+  per_client_step_send_backend,
+  per_client_step_receive_backend,
   per_client_step_write,
   per_client_step_close_notify,
 };
@@ -641,12 +616,12 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
         mbedtls_net_context client_fd;
         unsigned char client_ip[16];
         size_t cliip_len;
-
-      if( ( ret = mbedtls_net_accept( &gc->listen_fd, &client_fd,
-                                      client_ip, sizeof( client_ip ), &cliip_len ) ) != 0 )
-        {
-          return;
-        }
+        mbedtls_net_init(&client_fd);
+        if( ( ret = mbedtls_net_accept( &gc->listen_fd, &client_fd,
+                                        client_ip, sizeof( client_ip ), &cliip_len ) ) != 0 )
+          {
+            return;
+          }
       per_client_context *pcc = malloc(sizeof(per_client_context));
       per_client_init(gc,pcc,&client_fd,client_ip,cliip_len);
 
