@@ -310,8 +310,11 @@ typedef struct {
   unsigned char buf[4096];
   size_t len;
   ev_io per_client_watcher;
+  ev_io backend_watcher;
   client_step step;
 } per_client_context;
+
+static void per_client_dispatch(EV_P_ ev_io *w, int revents);
 
 static int per_client_deinit(per_client_context *pcc) {
   mbedtls_net_free(&pcc->backend_fd);
@@ -466,19 +469,6 @@ static void per_client_step_handshake(EV_P_ ev_io *w,
     case 0:
       log_debug("(%s:%d) DTLS handshake done", pcc->client_ip_str,
                 pcc->client_port);
-      ret =
-        mbedtls_net_connect(&pcc->backend_fd,
-                            pcc->options->backend_host,
-                            pcc->options->backend_port,
-                            MBEDTLS_NET_PROTO_UDP);
-      if (ret != 0) {
-        per_client_report_error(ret, pcc, "ssl handshake");
-        return per_client_defer_destruct(loop, w, pcc);
-      }
-      mbedtls_net_set_nonblock(&pcc->backend_fd);
-      log_info("Created socket to backend UDP %s:%s",
-               pcc->options->backend_host, pcc->options->backend_port);
-
       pcc->step = GOLDY_STEP_CLIENT_READ;
       return;
 
@@ -524,16 +514,29 @@ static void per_client_step_read(EV_P_ ev_io *w, per_client_context *pcc) {
         pcc->len = ret;
         log_debug("(%s:%d) %d bytes read from DTLS socket",
                   pcc->client_ip_str, pcc->client_port, ret);
+        ret = mbedtls_net_connect(&pcc->backend_fd,
+                                  pcc->options->backend_host,
+                                  pcc->options->backend_port,
+                                  MBEDTLS_NET_PROTO_UDP);
+        if (ret != 0) {
+          per_client_report_error(ret, pcc, "per_client_step_send_backend");
+          return per_client_defer_destruct(loop, w, pcc);
+        }
+        mbedtls_net_set_nonblock(&pcc->backend_fd);
+        log_info("Created socket to backend UDP %s:%s",pcc->options->backend_host, pcc->options->backend_port);
+        ev_io_init(&pcc->backend_watcher, per_client_dispatch,
+                   pcc->backend_fd.fd, EV_READ | EV_WRITE);
+        pcc->backend_watcher.data = pcc;
+        ev_io_start(loop,&pcc->backend_watcher);
+
         pcc->step = GOLDY_STEP_CLIENT_SEND_BACKEND;
         return;
       }
   }
 }
 
-static void per_client_step_send_backend(EV_P_ ev_io *w,
-                                          per_client_context *pcc) {
+static void per_client_step_send_backend(EV_P_ ev_io *w,per_client_context *pcc) {
   int ret = mbedtls_net_send(&pcc->backend_fd, pcc->buf, pcc->len);
-
   if (ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
     return;
   }
@@ -564,6 +567,7 @@ static void per_client_step_receive_backend(EV_P_ ev_io *w,
   log_debug("(%s:%d) %d bytes received from backend server",
             pcc->client_ip_str, pcc->client_port, ret);
   pcc->len = ret;
+  ev_io_stop(loop,&pcc->backend_watcher);
   pcc->step = GOLDY_STEP_CLIENT_WRITE;
 }
 
@@ -587,7 +591,6 @@ static void per_client_step_write(EV_P_ ev_io *w,
       log_debug("(%s:%d) %d bytes written to DTLS socket",
                 pcc->client_ip_str, pcc->client_port, ret);
       pcc->step = GOLDY_STEP_CLIENT_CLOSE_NOTIFY;
-      ev_invoke(loop, w, EV_NONE);
       return;
   }
 
