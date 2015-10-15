@@ -365,10 +365,18 @@ static int per_client_deinit(per_client_context *pcc) {
   return 0;
 }
 
-static int per_client_init(const global_context *gc,per_client_context *pcc) {
+static int per_client_init(const global_context *gc,per_client_context *pcc,const mbedtls_net_context* client_fd,
+                           unsigned char client_ip[16],size_t cliip_len) {
   int ret;
   memset(pcc, 0, sizeof(*pcc));
-  mbedtls_net_init( &pcc->client_fd );
+  memcpy(&pcc->client_fd,client_fd,sizeof(pcc->client_fd));
+  if ( cliip_len>sizeof(pcc->client_ip) )
+    {
+      log_error("per_client_init - client_ip size mismatch");
+      return 1;
+    }
+  memcpy(&pcc->client_ip,client_ip,cliip_len);
+  pcc->cliip_len = cliip_len;
   mbedtls_ssl_init( &pcc->ssl );
   pcc->step = GOLDY_STEP_CLIENT_HANDSHAKE;
   pcc->options = gc->options;
@@ -534,8 +542,7 @@ static void per_client_step_read(EV_P_ ev_io *w,per_client_context* pcc) {
     {
       per_client_report_error(ret,pcc,"per_client_cb - gracefully closed");
       pcc->step = GOLDY_STEP_CLIENT_CLOSE_NOTIFY;
-      per_client_defer_destruct(loop,w,pcc);
-      return;
+      return per_client_defer_destruct(loop,w,pcc);
     }
 
   default:
@@ -628,20 +635,21 @@ static void bind_listen_fd(EV_P_ ev_io* w,global_context* gc) {
 static void global_cb(EV_P_ ev_io *w, int revents) {
   global_context* gc = (global_context*)w->data;
   int ret = 0;
-  if ( revents!=2 ) {
-    log_debug("global_cb %x",revents);
-  }
+  (void)revents;
   if ( gc->step==GOLDY_STEP_GLOBAL_ACCEPT )
     {
-      per_client_context *pcc = malloc(sizeof(per_client_context));
-      per_client_init(gc,pcc);
-      if( ( ret = mbedtls_net_accept( &gc->listen_fd, &pcc->client_fd,
-                                      pcc->client_ip, sizeof( pcc->client_ip ), &pcc->cliip_len ) ) != 0 )
+        mbedtls_net_context client_fd;
+        unsigned char client_ip[16];
+        size_t cliip_len;
+
+      if( ( ret = mbedtls_net_accept( &gc->listen_fd, &client_fd,
+                                      client_ip, sizeof( client_ip ), &cliip_len ) ) != 0 )
         {
-          free(pcc);/* TODO - better to allocate the the PCC AFTER the connection was successfully created and use
-                       stack variables here */
           return;
         }
+      per_client_context *pcc = malloc(sizeof(per_client_context));
+      per_client_init(gc,pcc,&client_fd,client_ip,cliip_len);
+
       if ( per_client_connected(pcc)==0 )
         {
           /* mbedtls_net_accept replaces the listening sock :) So we need to bind it again to libev */
@@ -671,10 +679,6 @@ static int main_loop(global_context *gc) {
 
   log_info("main_loop - start");
   bind_listen_fd(loop,&global_watcher,gc);
-  /* using an idle watcher as a mean for repeated calls. not sure whether this is the optimal way to do it (periodic?)
-     ev_idle_init(&global_watcher,global_cb);
-     ev_idle_start(loop, &global_watcher);
-  */
   ev_loop(loop, 0);
 
   log_info("main_loop - exit");
