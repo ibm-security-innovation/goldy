@@ -6,8 +6,8 @@ BACKENDHOST=127.0.0.1
 BACKENDPORT=29502
 
 usage() {
-	  cat << EOF
-usage: $0 options
+  cat << EOF
+Usage: $0 [options]
 
 Runs the goldy test suite
 
@@ -16,6 +16,7 @@ OPTIONS:
    -l      keep log files after running
    -k      kill processes using pkill
    -s      skip log (keep stderr)
+   -t      skip test client log (keep test client stderr)
 EOF
 
 }
@@ -27,32 +28,32 @@ keep_test_client_stderr=0
 
 while getopts "klst" OPTION
 do
-    case $OPTION in
-        l)
-            keep_log_files=1
-			      echo "Keeping log files"
-            ;;
-        k)
-            pkill_processes=1
-			      echo "Will use pkill"
-            ;;
-        s)
-            keep_stderr=1
-			      echo "Will not capture stderr"
-            ;;
-        t)
-            keep_test_client_stderr=1
-			      echo "Will not capture stderr for test client(s)"
-            ;;
-        h)
-            usage
-            exit 1
-            ;;
-        ?)
-            usage
-            exit
-            ;;
-    esac
+  case $OPTION in
+    l)
+      keep_log_files=1
+      echo "Keeping log files"
+      ;;
+    k)
+      pkill_processes=1
+      echo "Will use pkill"
+      ;;
+    s)
+      keep_stderr=1
+      echo "Will not capture stderr"
+      ;;
+    t)
+      keep_test_client_stderr=1
+      echo "Will not capture stderr for test client(s)"
+      ;;
+    h)
+      usage
+      exit 1
+      ;;
+    ?)
+      usage
+      exit 1
+      ;;
+  esac
 done
 
 goldypid=
@@ -105,27 +106,21 @@ handle_signal() {
   exit 1
 }
 
-test_one_packet() {
+run_client_scenario() {
   testnum=$1
   description=$2
-  packet=$3
+  scenario=$3
 
   if [ $keep_test_client_stderr == 1 ]; then
-    test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -b "$packet"
+    test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -s "$scenario"
   else
-      test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -b "$packet" > test/log/test_client.log 2>&1
+    test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -s "$scenario" > test/log/test_client.log 2>&1
   fi
 
+  exitcode=$?
 
-
-  actual_line=$(grep 'bytes read' test/log/test_client.log)
-
-  expected_packet=$(echo -n "$packet" | rev)
-  expected_packet_len=${#expected_packet}
-  expected_line="dtls_test_client: $expected_packet_len bytes read: '$expected_packet'"
-  if [ "$actual_line" != "$expected_line" ] ; then
+  if [ $exitcode != 0 ] ; then
     echo "not ok $testnum - $description"
-    echo "  Expected \"$expected_line\" but got \"$actual_line\""
     return 1
   fi
   echo "ok $testnum - $description"
@@ -157,17 +152,20 @@ failures=0
 # Output test results in TAP format
 echo "1..4"
 
-test_one_packet 1 "Small packet 1" "A"
+run_client_scenario 1 "Small packet 1" "A"
 failures=$((failures+$?))
 
-test_one_packet 2 "Small packet 2" "Please reverse this message body"
+run_client_scenario 2 "Small packet 2" "Please reverse this message body"
 failures=$((failures+$?))
 
-test_one_packet 3 "Medium packet" "123456789012345678901234567890123456789012345678901234567890"
+run_client_scenario 3 "Medium packet" "123456789012345678901234567890123456789012345678901234567890"
 failures=$((failures+$?))
 
 many_spaces=$(printf '%1200s') # 1200 spaces
-test_one_packet 4 "Big packet" "A${many_spaces}Z"
+run_client_scenario 4 "Big packet" "A${many_spaces}Z"
+failures=$((failures+$?))
+
+run_client_scenario 5 "4 small packets" "ABCDEF,sleep=100,GHIJKL,sleep=200,MNOPQRS,sleep=100,TUVWXYZ"
 failures=$((failures+$?))
 
 cleanup
