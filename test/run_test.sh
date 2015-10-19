@@ -106,18 +106,31 @@ handle_signal() {
   exit 1
 }
 
-run_client_scenario() {
+run_concurrent_client_scenarios() {
   testnum=$1
   description=$2
-  scenario=$3
+  clients_scenarios=${@:3}
 
-  if [ $keep_test_client_stderr == 1 ]; then
-    test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -s "$scenario"
-  else
-    test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -s "$scenario" > test/log/test_client.log 2>&1
-  fi
+  pids=""
+  for scenario in $clients_scenarios ; do
+    if [ $keep_test_client_stderr == 1 ]; then
+      test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -s "$scenario" &
+    else
+      test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -s "$scenario" >> test/log/test_client.log 2>&1 &
+    fi
+    pids="$pids $!"
+  done
 
-  exitcode=$?
+  # Optimistic approach
+  exitcode=0
+
+  for clientpid in $pids ; do
+    wait $clientpid
+    clientexitcode=$?
+    if [ $clientexitcode != 0 ] ; then
+      exitcode=1
+    fi
+  done
 
   if [ $exitcode != 0 ] ; then
     echo "not ok $testnum - $description"
@@ -137,7 +150,6 @@ else
   ./goldy -g DEBUG -l $GOLDYHOST:$GOLDYPORT -b $BACKENDHOST:$BACKENDPORT -c test/keys/test-proxy-cert.pem -k test/keys/test-proxy-key.pem > test/log/goldy.log 2>&1 &
 fi
 
-
 goldypid=$!
 
 log "Starting test UDP backend server..."
@@ -149,23 +161,48 @@ sleep 1
 
 failures=0
 
+# Note: in order to avoid bash quoting hell, we're avoiding spaces in the
+# client scenarios. This means that each argument ("word") is one scenario
+# which will be run in its own client.
+
+many_spaces=$(printf '%1200s' | tr ' ' '_') # 1200 underscores
+big_packet="A${many_spaces}Z"
+four_packets="ABCDEF,sleep=50,GHIJKL,sleep=50,MNOPQRS,sleep=50,TUVWXYZ"
+three_big_packets="$big_packet,sleep=100,$big_packet,sleep=100,$big_packet"
+
 # Output test results in TAP format
-echo "1..4"
+echo "1..8"
 
-run_client_scenario 1 "Small packet 1" "A"
+run_concurrent_client_scenarios 1 "Small packet 1" "A"
 failures=$((failures+$?))
 
-run_client_scenario 2 "Small packet 2" "Please reverse this message body"
+run_concurrent_client_scenarios 2 "Small packet 2" "Please_reverse_this_message_body"
 failures=$((failures+$?))
 
-run_client_scenario 3 "Medium packet" "123456789012345678901234567890123456789012345678901234567890"
+run_concurrent_client_scenarios 3 "Medium packet" "123456789012345678901234567890123456789012345678901234567890"
 failures=$((failures+$?))
 
-many_spaces=$(printf '%1200s') # 1200 spaces
-run_client_scenario 4 "Big packet" "A${many_spaces}Z"
+run_concurrent_client_scenarios 4 "Big packet" "$big_packet"
 failures=$((failures+$?))
 
-run_client_scenario 5 "4 small packets" "ABCDEF,sleep=100,GHIJKL,sleep=200,MNOPQRS,sleep=100,TUVWXYZ"
+run_concurrent_client_scenarios 5 "4 small sequential packets" \
+  "ABCDEF,sleep=100,GHIJKL,sleep=200,MNOPQRS,sleep=100,TUVWXYZ"
+failures=$((failures+$?))
+
+run_concurrent_client_scenarios 6 "3 parallel client with 4 distinct small packets" \
+  "ABCDEF,sleep=100,GHIJKL,sleep=200,MNOPQRS,sleep=100,TUVWXYZ" \
+  "123456,sleep=100,7890AB,sleep=100,CDEFGHI,sleep=150,JKLMNOP" \
+  "ZYXWVU,sleep=50,TSRQPO,sleep=200,NMLKJIH,sleep=150,GFEDCBA"
+failures=$((failures+$?))
+
+run_concurrent_client_scenarios 7 "10 identical parallel clients with 4 small packets each" \
+  "$four_packets" "$four_packets" "$four_packets" "$four_packets "$four_packets" \
+  "$four_packets" "$four_packets" "$four_packets" "$four_packets "$four_packets"
+failures=$((failures+$?))
+
+run_concurrent_client_scenarios 8 "4 small clients and 4 big clients (all in parallel)" \
+  "$four_packets" "$three_big_packets" "$four_packets" "$three_big_packets" \
+  "$four_packets" "$three_big_packets" "$four_packets" "$three_big_packets"
 failures=$((failures+$?))
 
 cleanup
