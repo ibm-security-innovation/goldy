@@ -8,6 +8,7 @@ WARNING_CFLAGS ?= -Wall -W -Wdeclaration-after-statement
 LDFLAGS ?=
 
 LOCAL_CFLAGS = $(WARNING_CFLAGS) -I$(MBEDTLS_INC_DIR) -I$(LIBEV_INC_DIR) -D_FILE_OFFSET_BITS=64
+LOCAL_LDFLAGS = -lm
 MBEDTLS_LIBS = $(MBEDTLS_LIB_DIR)/libmbedtls.a $(MBEDTLS_LIB_DIR)/libmbedx509.a $(MBEDTLS_LIB_DIR)/libmbedcrypto.a
 MBEDTLS_CONFIG_INC = $(MBEDTLS_INC_DIR)/mbedtls/config.h
 LIBEV_LIBS = $(LIBEV_LIB_DIR)/.libs/libev.a
@@ -16,17 +17,17 @@ ifdef DEBUG
 LOCAL_CFLAGS += -g3
 endif
 
+# Zlib shared library extensions:
+ifdef ZLIB
+LOCAL_LDFLAGS += -lz
+endif
+
 COMPILE=$(QUIET_CC) $(CC) $(LOCAL_CFLAGS) $(CFLAGS)
-LINK=$(QUIET_LINK) $(CC) $(LDFLAGS)
+LINK=$(QUIET_LINK) $(CC) $(LOCAL_LDFLAGS) $(LDFLAGS)
 
 ifndef V
 QUIET_CC   = @echo "  CC    $@" 1>&2;
 QUIET_LINK = @echo "  LINK  $@" 1>&2;
-endif
-
-# Zlib shared library extensions:
-ifdef ZLIB
-LOCAL_LDFLAGS += -lz
 endif
 
 APP = goldy
