@@ -191,13 +191,25 @@ static int global_deinit(global_context *gc) {
   return ret == 0 ? 0 : 1;
 }
 
+static int bind_listen_fd(global_context *gc) {
+  int ret;
+  ret = mbedtls_net_bind(&gc->listen_fd, gc->options->listen_host, gc->options->listen_port,
+                             MBEDTLS_NET_PROTO_UDP);
+  if ( ret!=0 ) {
+    check_return_code(ret, "bind_listen_fd");
+    return ret;
+  }
+  log_debug("Binded UDP %s:%s", gc->options->listen_host, gc->options->listen_port);
+  mbedtls_net_set_nonblock(&gc->listen_fd);
+  return 0;
+}
+
 static int global_init(const struct instance *gi, global_context *gc) {
   int ret;
   const char *pers = "goldy";
 
   memset(gc, 0, sizeof(*gc));
   gc->options = gi;
-  mbedtls_net_init(&gc->listen_fd);
   mbedtls_ssl_config_init(&gc->conf);
   mbedtls_ssl_cookie_init(&gc->cookie_ctx);
 #if defined(MBEDTLS_SSL_CACHE_C)
@@ -209,6 +221,11 @@ static int global_init(const struct instance *gi, global_context *gc) {
   mbedtls_ctr_drbg_init(&gc->ctr_drbg);
 
   log_info("Goldy %s starting up", GOLDY_VERSION);
+  mbedtls_net_init(&gc->listen_fd);
+  ret = bind_listen_fd(gc);
+  if ( ret!=0 ) {
+    goto exit;
+  }
 
   ret = mbedtls_x509_crt_parse_file(&gc->srvcert, gi->cert_file);
   if (ret != 0) {
@@ -225,13 +242,6 @@ static int global_init(const struct instance *gi, global_context *gc) {
   }
   log_debug("Loaded private key file");
 
-  if ((ret=mbedtls_net_bind(&gc->listen_fd, gi->listen_host, gi->listen_port,
-                            MBEDTLS_NET_PROTO_UDP)) != 0) {
-    printf(" failed\n  ! mbedtls_net_bind returned %d\n\n", ret);
-    goto exit;
-  }
-  log_debug("Binded UDP %s:%s", gi->listen_host, gi->listen_port);
-  mbedtls_net_set_nonblock(&gc->listen_fd);
   if ((ret=mbedtls_ctr_drbg_seed(&gc->ctr_drbg, mbedtls_entropy_func,
                                  &gc->entropy, (const unsigned char *)pers,
                                  strlen(pers))) != 0) {
@@ -294,6 +304,7 @@ typedef enum {
   GOLDY_SESSION_STEP_RECEIVE_BACKEND,
   GOLDY_SESSION_STEP_WRITE,
   GOLDY_SESSION_STEP_CLOSE_NOTIFY,
+  GOLDY_SESSION_STEP_DESTRUCTING,
   GOLDY_SESSION_STEP_LAST,
 } session_step;
 
@@ -423,43 +434,34 @@ static int session_connected(session_context *sc) {
   return ret == 0 ? 0 : 1;
 }
 
-static void session_destruct(int revents, void *arg) {
-  session_context *sc = (session_context *) arg;
+static void session_destruct(EV_P_ ev_io *w,
+                                   session_context *sc,
+                                   const char* reason) {
+  (void)w;
+  log_debug("session_destruct - %s %x %d",reason,sc,sc->client_fd.fd);
+  sc->step = GOLDY_SESSION_STEP_DESTRUCTING;
+  ev_io_stop(loop,&sc->backend_watcher);
+  ev_io_stop(loop,&sc->session_watcher);
 
-  (void)revents;
-  log_debug("(%s:%d) session_destruct %x", sc->client_ip_str,
-            sc->client_port, sc);
   session_deinit(sc);
   free(sc);
 }
 
-static void session_defer_destruct(EV_P_ ev_io *w,
-                                       session_context *sc) {
-  ev_once(loop, -1, 0, 0, session_destruct, sc);
-  ev_io_stop(loop, w);
+static void session_destruct_after_error(EV_P_ ev_io *w,
+                                               session_context *sc,int ret,
+                                               const char *label) {
+  session_report_error(ret,sc,label);
+  session_destruct(loop,w,sc,label);
 }
 
-static void session_reset(int revents, void *arg) {
-  /*
-   *the name is misleading - net_free actually shutdown/close the socket but
-   *doesn'tfree any resources, hence it can be called repeatedly, even
-   *without net_init (which actually does nothing other than set the fd to
-   *-1.
-   */
-  session_context *sc = (session_context *) arg;
-
-  (void)revents;
+static void session_reset(EV_P_ ev_io *w,
+                                    session_context *sc) {
+  (void)w;
   log_debug("(%s:%d) session_reset %x", sc->client_ip_str,
             sc->client_port, sc);
   mbedtls_net_free(&sc->client_fd);
   mbedtls_ssl_session_reset(&sc->ssl);
-}
-
-
-static void session_defer_reset(EV_P_ ev_io *w,
-                                    session_context *sc) {
-  ev_once(loop, -1, 0, 0, session_reset, sc);
-  ev_io_stop(loop, w);
+  ev_io_stop(loop,&sc->session_watcher);
 }
 
 
@@ -482,11 +484,10 @@ static void session_step_handshake(EV_P_ ev_io *w,
     case MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED:
       log_debug("(%s:%d) DTLS handshake requested hello verification",
                 sc->client_ip_str, sc->client_port);
-      return session_defer_reset(loop, w, sc);
+      return session_reset(loop, w, sc);
 
     default:
-      session_report_error(ret, sc, "session_cb - ssl handshake");
-      return session_defer_destruct(loop, w, sc);
+      return session_destruct_after_error(loop, w, sc, ret, "session_cb - ssl handshake");
   }
 }
 
@@ -503,8 +504,7 @@ static void session_step_read(EV_P_ ev_io *w, session_context *sc) {
       return;
 
     case MBEDTLS_ERR_SSL_TIMEOUT:
-      session_report_error(ret, sc, "session_cb - timeout");
-      return session_defer_destruct(loop, w, sc);
+      return session_destruct_after_error(loop, w, sc, ret, "session_cb - timeout");
 
     case MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY:
       log_info("(%s:%d) Client asked to close DTLS session",
@@ -514,9 +514,7 @@ static void session_step_read(EV_P_ ev_io *w, session_context *sc) {
 
     default:
       if (ret < 0) {
-        session_report_error(ret, sc,
-                                "session_cb - unknwon error");
-        return session_defer_destruct(loop, w, sc);
+        return session_destruct_after_error(loop, w, sc, ret, "session_cb - unknwon error");
       } else {
         sc->len = ret;
         log_debug("(%s:%d) %d bytes read from DTLS socket",
@@ -526,8 +524,7 @@ static void session_step_read(EV_P_ ev_io *w, session_context *sc) {
                                   sc->options->backend_port,
                                   MBEDTLS_NET_PROTO_UDP);
         if (ret != 0) {
-          session_report_error(ret, sc, "session_step_send_backend");
-          return session_defer_destruct(loop, w, sc);
+          return session_destruct_after_error(loop, w, sc, ret, "session_step_send_backend");
         }
         mbedtls_net_set_nonblock(&sc->backend_fd);
         log_info("Created socket to backend UDP %s:%s",sc->options->backend_host, sc->options->backend_port);
@@ -548,8 +545,7 @@ static void session_step_send_backend(EV_P_ ev_io *w,session_context *sc) {
     return;
   }
   if (ret < 0) {
-    session_report_error(ret, sc, "session_step_send_backend");
-    return session_defer_destruct(loop, w, sc);
+    return session_destruct_after_error(loop, w, sc, ret, "session_step_send_backend");
   }
   log_debug("(%s:%d) %d bytes sent to backend server",
             sc->client_ip_str, sc->client_port, ret);
@@ -558,7 +554,7 @@ static void session_step_send_backend(EV_P_ ev_io *w,session_context *sc) {
 }
 
 static void session_step_receive_backend(EV_P_ ev_io *w,
-                                             session_context *sc) {
+                                         session_context *sc) {
   int ret;
 
   sc->len = sizeof(sc->buf) - 1;
@@ -568,13 +564,11 @@ static void session_step_receive_backend(EV_P_ ev_io *w,
     return;
   }
   if (ret < 0) {
-    session_report_error(ret, sc, "session_step_send_backend");
-    return session_defer_destruct(loop, w, sc);
+    return session_destruct_after_error(loop, w, sc, ret, "session_step_send_backend");
   }
   log_debug("(%s:%d) %d bytes received from backend server",
             sc->client_ip_str, sc->client_port, ret);
   sc->len = ret;
-  ev_io_stop(loop,&sc->backend_watcher);
   sc->step = GOLDY_SESSION_STEP_WRITE;
 }
 
@@ -590,14 +584,13 @@ static void session_step_write(EV_P_ ev_io *w,
 
     default:
       if (ret < 0) {
-        session_report_error(ret, sc,
-                                "session_cb - write error");
-        return session_defer_destruct(loop, w, sc);
+        return session_destruct_after_error(loop, w, sc, ret, "session_cb - write error");
       }
       /* ret is the written len */
       log_debug("(%s:%d) %d bytes written to DTLS socket",
                 sc->client_ip_str, sc->client_port, ret);
       sc->step = GOLDY_SESSION_STEP_READ;
+      ev_io_stop(loop,&sc->backend_watcher);
       return;
   }
 
@@ -610,7 +603,14 @@ static void session_step_close_notify(EV_P_ ev_io *w,
   if (ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
     return;
   }
-  session_defer_destruct(loop, w, sc);
+  session_destruct(loop, w, sc, "close_notify");
+}
+
+static void session_step_destructing(EV_P_ ev_io *w,
+                                     session_context *sc) {
+  (void)loop;
+  (void)w;
+  (void)sc;
 }
 
 typedef void (*session_step_cb) (EV_P_ ev_io *w,
@@ -623,16 +623,23 @@ static session_step_cb session_callbacks[GOLDY_SESSION_STEP_LAST] = {
   session_step_receive_backend,
   session_step_write,
   session_step_close_notify,
+  session_step_destructing
 };
 
 static void session_dispatch(EV_P_ ev_io *w, int revents) {
   session_context *sc = (session_context *) w->data;
 
-  log_debug("session_dispatch events:%x step:%d", revents, sc->step);
+  if ( revents!=2 ) {
+    log_debug("session_dispatch %d", w->fd);
+    log_debug("(%s:%d:%d) session_dispatch events:%x step:%d", sc->client_ip_str, sc->client_port,
+              sc->client_fd.fd,revents, sc->step);
+  }
   session_callbacks[sc->step] (loop, w, sc);
 }
 
-static void bind_listen_fd(EV_P_ ev_io *w, global_context *gc) {
+static void start_listen_io(EV_P_ ev_io *w, global_context *gc)
+{
+  log_debug("start_listen_io - %d",gc->listen_fd.fd);
   ev_io_init(w, global_cb, gc->listen_fd.fd,
              EV_NONE | EV_READ | EV_WRITE);
   w->data = gc;
@@ -643,7 +650,10 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
   global_context *gc = (global_context *) w->data;
   int ret = 0;
 
-  (void)revents;
+  if ( revents!=2 ) {
+    log_debug("(%d) global_cb events: %d",w->fd,revents);
+  }
+
   if (gc->step == GOLDY_GLOBAL_STEP_ACCEPT) {
     mbedtls_net_context client_fd;
     unsigned char client_ip[16];
@@ -670,10 +680,12 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
      *it again to libev
      */
     ev_io_stop(loop, w);
-    bind_listen_fd(loop, w, gc);
+    log_debug("global_cb - switching %d->%d",client_fd.fd,gc->listen_fd.fd);
     mbedtls_net_set_nonblock(&gc->listen_fd);
+    start_listen_io(loop, w, gc);
     session_start(sc,loop);
-   return;
+    log_debug("global_cb - session_start");
+    return;
   }
 }
 
@@ -684,7 +696,7 @@ static int main_loop(global_context *gc) {
 
 
   log_info("main_loop - start");
-  bind_listen_fd(loop, &global_watcher, gc);
+  start_listen_io(loop, &global_watcher, gc);
   ev_loop(loop, 0);
 
   log_info("main_loop - exit");
