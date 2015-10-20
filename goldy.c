@@ -507,8 +507,8 @@ static void session_step_read(EV_P_ ev_io *w, session_context *sc) {
       return session_defer_destruct(loop, w, sc);
 
     case MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY:
-      session_report_error(ret, sc,
-                              "session_cb - gracefully closed");
+      log_info("(%s:%d) Client asked to close DTLS session",
+               sc->client_ip_str, sc->client_port);
       sc->step = GOLDY_SESSION_STEP_CLOSE_NOTIFY;
       return;
 
@@ -597,7 +597,7 @@ static void session_step_write(EV_P_ ev_io *w,
       /* ret is the written len */
       log_debug("(%s:%d) %d bytes written to DTLS socket",
                 sc->client_ip_str, sc->client_port, ret);
-      sc->step = GOLDY_SESSION_STEP_CLOSE_NOTIFY;
+      sc->step = GOLDY_SESSION_STEP_READ;
       return;
   }
 
@@ -648,6 +648,7 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
     mbedtls_net_context client_fd;
     unsigned char client_ip[16];
     size_t cliip_len;
+    session_context *sc;
 
     mbedtls_net_init(&client_fd);
     if ((ret = mbedtls_net_accept(&gc->listen_fd, &client_fd,
@@ -655,7 +656,7 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
                                   &cliip_len)) != 0) {
       return;
     }
-    session_context *sc = malloc(sizeof(session_context));
+    sc = malloc(sizeof(session_context));
 
     session_init(gc, sc, &client_fd, client_ip, cliip_len);
 

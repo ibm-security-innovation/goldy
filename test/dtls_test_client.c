@@ -19,12 +19,26 @@
 #include "mbedtls/timing.h"
 
 #include <getopt.h>
+#include <stdarg.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 #define READ_TIMEOUT_MS 2000
 #define MAX_RETRY       5
 
 #define DEBUG_LEVEL 0
+
+static void plog(const char* format, ...) {
+    char newformat[1024];
+    va_list arglist;
+
+    va_start(arglist, format);
+    snprintf(newformat, sizeof(newformat), "dtls_test_client(PID=%d): %s\n", getpid(), format);
+    vprintf(newformat, arglist);
+    va_end(arglist);
+    fflush(stdout);
+}
 
 static void my_debug( void *ctx, int level,
                       const char *file, int line,
@@ -37,22 +51,127 @@ static void my_debug( void *ctx, int level,
 }
 
 void print_usage(const char* argv0) {
-    printf("Usage: %s -h host -p port [-n ssl_hostname] -b packet_body\n", argv0);
+    printf("Usage: %s -h host -p port [-n ssl_hostname] -s scenario\n", argv0);
     exit(1);
+}
+
+/* Return 1 if a equals to reverse(b) */
+int is_reverse(const char *a, const char *b) {
+    size_t len = strlen(a);
+    size_t i = 0;
+
+    if (strlen(b) != len) {
+        return 0;
+    }
+
+    for (i = 0; i < len; i++) {
+        if (a[i] != b[len - 1 - i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int send_one_packet(const char* packet_body, mbedtls_ssl_context *ssl) {
+    int ret, len;
+    unsigned char buf[10000];
+
+    plog("sending packet: '%s'", packet_body);
+    fflush( stdout );
+
+    len = strlen(packet_body);
+
+    do ret = mbedtls_ssl_write( ssl, (unsigned char *) packet_body, len );
+    while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
+           ret == MBEDTLS_ERR_SSL_WANT_WRITE );
+
+    if (ret < 0) {
+        plog("ERROR: mbedtls_ssl_write returned %d", ret);
+        return ret;
+    }
+
+    len = ret;
+    plog("%d bytes written: '%s'", len, packet_body);
+
+    plog("Read from server...");
+
+    len = sizeof( buf ) - 1;
+    memset( buf, 0, sizeof( buf ) );
+
+    do {
+        ret = mbedtls_ssl_read(ssl, buf, len);
+    } while (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE);
+
+    if (ret <= 0) {
+        switch(ret) {
+        case MBEDTLS_ERR_SSL_TIMEOUT:
+            plog("ERROR: timeout");
+            return ret;
+
+        case MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY:
+            plog("ERROR: connection was closed gracefully");
+            return ret;
+
+        default:
+            plog("ERROR: mbedtls_ssl_read returned -0x%x", -ret );
+            return ret;
+        }
+    }
+
+    len = ret;
+    plog("%d bytes read: '%s'", len, buf);
+    fflush(stdout);
+
+    if (is_reverse(packet_body, (char*)buf)) {
+        return 0; /* Success */
+    }
+    return -1;
+}
+
+int run_scenario(const char* scenario, mbedtls_ssl_context *ssl) {
+    int ret;
+    const char *p = scenario;
+    char packet[10000];
+
+    plog("Running scenario: '%s'", scenario);
+
+    while (p) {
+        char *comma = strchr(p, ',');
+        if (comma) {
+            int packet_len = comma - p;
+            memcpy(packet, p, packet_len);
+            packet[packet_len] = '\0';
+            p = comma + 1;
+        } else {
+            strncpy(packet, p, sizeof(packet));
+            p = NULL;
+        }
+        if (strncmp("sleep=", packet, 6) == 0) {
+            long sleepmillis = atol(packet + 6);
+            struct timespec req = { tv_sec: (sleepmillis / 1000), tv_nsec: (sleepmillis % 1000) * 1000000 };
+            plog("Scenario: sleeping %ld milliseconds", sleepmillis);
+            nanosleep(&req, NULL);
+        } else {
+            ret = send_one_packet(packet, ssl);
+            if (ret != 0) {
+                return ret;
+            }
+        }
+    }
+    plog("Scenario successful!");
+    return 0;
 }
 
 int main( int argc, char *argv[] )
 {
-    int ret, len;
+    int ret;
     mbedtls_net_context server_fd;
     uint32_t flags;
-    unsigned char buf[10000];
-    char packet_body[10000] = "";
+    char scenario[10000] = "";
     char server_host[100] = "";
     char server_port[6] = "";
     char server_ssl_hostname[100] = "";
     const char *pers = "dtls_client";
-    int retry_left = MAX_RETRY;
     int opt;
 
     mbedtls_entropy_context entropy;
@@ -63,11 +182,8 @@ int main( int argc, char *argv[] )
     mbedtls_timing_delay_context timer;
 
     /* Parse command line */
-    while ((opt = getopt(argc, argv, "b:h:n:p:")) != -1) {
+    while ((opt = getopt(argc, argv, "h:n:p:s:")) != -1) {
         switch (opt) {
-        case 'b':
-            strncpy(packet_body, optarg, sizeof(packet_body));
-            break;
         case 'h':
             strncpy(server_host, optarg, sizeof(server_host));
             break;
@@ -77,12 +193,15 @@ int main( int argc, char *argv[] )
         case 'p':
             strncpy(server_port, optarg, sizeof(server_port));
             break;
+        case 's':
+            strncpy(scenario, optarg, sizeof(scenario));
+            break;
         default: /* '?' */
             print_usage(argv[0]);
         }
     }
 
-    if (!(packet_body[0] && server_port[0] && server_host[0])) {
+    if (!(scenario[0] && server_port[0] && server_host[0])) {
         print_usage(argv[0]);
     }
 
@@ -133,9 +252,6 @@ int main( int argc, char *argv[] )
 
     printf( "dtls_test_client: ok (%d skipped)\n", ret );
 
-    /*
-     * 1. Start the connection
-     */
     printf( "dtls_test_client: Connecting to udp %s:%s (SSL hostname: %s)...\n", server_host, server_port, server_ssl_hostname);
     fflush( stdout );
 
@@ -147,9 +263,6 @@ int main( int argc, char *argv[] )
 
     printf( "dtls_test_client: ok\n" );
 
-    /*
-     * 2. Setup stuff
-     */
     printf( "dtls_test_client: Setting up the DTLS structure...\n" );
     fflush( stdout );
 
@@ -191,9 +304,6 @@ int main( int argc, char *argv[] )
 
     printf( "dtls_test_client: ok\n" );
 
-    /*
-     * 4. Handshake
-     */
     printf( "dtls_test_client: Performing the SSL/TLS handshake...\n" );
     fflush( stdout );
 
@@ -209,9 +319,6 @@ int main( int argc, char *argv[] )
 
     printf( "dtls_test_client: ok\n" );
 
-    /*
-     * 5. Verify the server certificate
-     */
     printf( "dtls_test_client: Verifying peer X.509 certificate...\n" );
 
     /* In real life, we would have used MBEDTLS_SSL_VERIFY_REQUIRED so that the
@@ -230,70 +337,11 @@ int main( int argc, char *argv[] )
     else
         printf( "dtls_test_client: ok\n" );
 
-    /*
-     * 6. Write the echo request
-     */
-send_request:
-    printf( "dtls_test_client: Write to server:\n" );
-    fflush( stdout );
-
-    len = strlen(packet_body);
-
-    do ret = mbedtls_ssl_write( &ssl, (unsigned char *) packet_body, len );
-    while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
-           ret == MBEDTLS_ERR_SSL_WANT_WRITE );
-
-    if( ret < 0 )
-    {
-        printf( " failed\n  ! mbedtls_ssl_write returned %d\n\n", ret );
+    ret = run_scenario(scenario, &ssl);
+    if (ret != 0) {
         goto exit;
     }
 
-    len = ret;
-    printf( "dtls_test_client: %d bytes written: '%s'\n", len, packet_body );
-
-    /*
-     * 7. Read the echo response
-     */
-    printf( "dtls_test_client: Read from server:\n" );
-    fflush( stdout );
-
-    len = sizeof( buf ) - 1;
-    memset( buf, 0, sizeof( buf ) );
-
-    do ret = mbedtls_ssl_read( &ssl, buf, len );
-    while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
-           ret == MBEDTLS_ERR_SSL_WANT_WRITE );
-
-    if( ret <= 0 )
-    {
-        switch( ret )
-        {
-            case MBEDTLS_ERR_SSL_TIMEOUT:
-                printf( "dtls_test_client:  timeout\n\n" );
-                if( retry_left-- > 0 )
-                    goto send_request;
-                goto exit;
-
-            case MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY:
-                printf( "dtls_test_client:  connection was closed gracefully\n" );
-                ret = 0;
-                goto close_notify;
-
-            default:
-                printf( "dtls_test_client:  mbedtls_ssl_read returned -0x%x\n\n", -ret );
-                goto exit;
-        }
-    }
-
-    len = ret;
-    printf( "dtls_test_client: %d bytes read: '%s'\n", len, buf );
-    fflush(stdout);
-
-    /*
-     * 8. Done, cleanly close the connection
-     */
-close_notify:
     printf( "dtls_test_client: Closing the connection...\n" );
 
     /* No error checking, the connection might be closed already */
@@ -303,9 +351,6 @@ close_notify:
 
     printf( "dtls_test_client: done\n" );
 
-    /*
-     * 9. Final clean-ups and exit
-     */
 exit:
 
 #ifdef MBEDTLS_ERROR_C

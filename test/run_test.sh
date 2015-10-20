@@ -6,8 +6,8 @@ BACKENDHOST=127.0.0.1
 BACKENDPORT=29502
 
 usage() {
-	  cat << EOF
-usage: $0 options
+  cat << EOF
+Usage: $0 [options]
 
 Runs the goldy test suite
 
@@ -16,6 +16,7 @@ OPTIONS:
    -l      keep log files after running
    -k      kill processes using pkill
    -s      skip log (keep stderr)
+   -t      skip test client log (keep test client stderr)
 EOF
 
 }
@@ -27,32 +28,32 @@ keep_test_client_stderr=0
 
 while getopts "klst" OPTION
 do
-    case $OPTION in
-        l)
-            keep_log_files=1
-			      echo "Keeping log files"
-            ;;
-        k)
-            pkill_processes=1
-			      echo "Will use pkill"
-            ;;
-        s)
-            keep_stderr=1
-			      echo "Will not capture stderr"
-            ;;
-        t)
-            keep_test_client_stderr=1
-			      echo "Will not capture stderr for test client(s)"
-            ;;
-        h)
-            usage
-            exit 1
-            ;;
-        ?)
-            usage
-            exit
-            ;;
-    esac
+  case $OPTION in
+    l)
+      keep_log_files=1
+      echo "Keeping log files"
+      ;;
+    k)
+      pkill_processes=1
+      echo "Will use pkill"
+      ;;
+    s)
+      keep_stderr=1
+      echo "Will not capture stderr"
+      ;;
+    t)
+      keep_test_client_stderr=1
+      echo "Will not capture stderr for test client(s)"
+      ;;
+    h)
+      usage
+      exit 1
+      ;;
+    ?)
+      usage
+      exit 1
+      ;;
+  esac
 done
 
 goldypid=
@@ -105,27 +106,34 @@ handle_signal() {
   exit 1
 }
 
-test_one_packet() {
+run_concurrent_client_scenarios() {
   testnum=$1
   description=$2
-  packet=$3
+  clients_scenarios=${@:3}
 
-  if [ $keep_test_client_stderr == 1 ]; then
-    test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -b "$packet"
-  else
-      test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -b "$packet" > test/log/test_client.log 2>&1
-  fi
+  pids=""
+  for scenario in $clients_scenarios ; do
+    if [ $keep_test_client_stderr == 1 ]; then
+      test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -s "$scenario" &
+    else
+      test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -s "$scenario" >> test/log/test_client.log 2>&1 &
+    fi
+    pids="$pids $!"
+  done
 
+  # Optimistic approach
+  exitcode=0
 
+  for clientpid in $pids ; do
+    wait $clientpid
+    clientexitcode=$?
+    if [ $clientexitcode != 0 ] ; then
+      exitcode=1
+    fi
+  done
 
-  actual_line=$(grep 'bytes read' test/log/test_client.log)
-
-  expected_packet=$(echo -n "$packet" | rev)
-  expected_packet_len=${#expected_packet}
-  expected_line="dtls_test_client: $expected_packet_len bytes read: '$expected_packet'"
-  if [ "$actual_line" != "$expected_line" ] ; then
+  if [ $exitcode != 0 ] ; then
     echo "not ok $testnum - $description"
-    echo "  Expected \"$expected_line\" but got \"$actual_line\""
     return 1
   fi
   echo "ok $testnum - $description"
@@ -142,7 +150,6 @@ else
   ./goldy -g DEBUG -l $GOLDYHOST:$GOLDYPORT -b $BACKENDHOST:$BACKENDPORT -c test/keys/test-proxy-cert.pem -k test/keys/test-proxy-key.pem > test/log/goldy.log 2>&1 &
 fi
 
-
 goldypid=$!
 
 log "Starting test UDP backend server..."
@@ -154,20 +161,48 @@ sleep 1
 
 failures=0
 
+# Note: in order to avoid bash quoting hell, we're avoiding spaces in the
+# client scenarios. This means that each argument ("word") is one scenario
+# which will be run in its own client.
+
+many_spaces=$(printf '%1200s' | tr ' ' '_') # 1200 underscores
+big_packet="A${many_spaces}Z"
+four_packets="ABCDEF,sleep=50,GHIJKL,sleep=50,MNOPQRS,sleep=50,TUVWXYZ"
+three_big_packets="$big_packet,sleep=100,$big_packet,sleep=100,$big_packet"
+
 # Output test results in TAP format
-echo "1..4"
+echo "1..8"
 
-test_one_packet 1 "Small packet 1" "A"
+run_concurrent_client_scenarios 1 "Small packet 1" "A"
 failures=$((failures+$?))
 
-test_one_packet 2 "Small packet 2" "Please reverse this message body"
+run_concurrent_client_scenarios 2 "Small packet 2" "Please_reverse_this_message_body"
 failures=$((failures+$?))
 
-test_one_packet 3 "Medium packet" "123456789012345678901234567890123456789012345678901234567890"
+run_concurrent_client_scenarios 3 "Medium packet" "123456789012345678901234567890123456789012345678901234567890"
 failures=$((failures+$?))
 
-many_spaces=$(printf '%1200s') # 1200 spaces
-test_one_packet 4 "Big packet" "A${many_spaces}Z"
+run_concurrent_client_scenarios 4 "Big packet" "$big_packet"
+failures=$((failures+$?))
+
+run_concurrent_client_scenarios 5 "4 small sequential packets" \
+  "ABCDEF,sleep=100,GHIJKL,sleep=200,MNOPQRS,sleep=100,TUVWXYZ"
+failures=$((failures+$?))
+
+run_concurrent_client_scenarios 6 "3 parallel client with 4 distinct small packets" \
+  "ABCDEF,sleep=100,GHIJKL,sleep=200,MNOPQRS,sleep=100,TUVWXYZ" \
+  "123456,sleep=100,7890AB,sleep=100,CDEFGHI,sleep=150,JKLMNOP" \
+  "ZYXWVU,sleep=50,TSRQPO,sleep=200,NMLKJIH,sleep=150,GFEDCBA"
+failures=$((failures+$?))
+
+run_concurrent_client_scenarios 7 "10 identical parallel clients with 4 small packets each" \
+  "$four_packets" "$four_packets" "$four_packets" "$four_packets "$four_packets" \
+  "$four_packets" "$four_packets" "$four_packets" "$four_packets "$four_packets"
+failures=$((failures+$?))
+
+run_concurrent_client_scenarios 8 "4 small clients and 4 big clients (all in parallel)" \
+  "$four_packets" "$three_big_packets" "$four_packets" "$three_big_packets" \
+  "$four_packets" "$three_big_packets" "$four_packets" "$three_big_packets"
 failures=$((failures+$?))
 
 cleanup
