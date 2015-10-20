@@ -128,31 +128,50 @@ int send_one_packet(const char* packet_body, mbedtls_ssl_context *ssl) {
 
 int run_scenario(const char* scenario, mbedtls_ssl_context *ssl) {
     int ret;
+    int repeat = 1;
     const char *p = scenario;
+    const char *start;
     char packet[10000];
 
     plog("Running scenario: '%s'", scenario);
 
-    while (p) {
+    if (strncmp("repeat=", p, 7) == 0) {
         char *comma = strchr(p, ',');
         if (comma) {
             int packet_len = comma - p;
             memcpy(packet, p, packet_len);
             packet[packet_len] = '\0';
+            repeat = atoi(packet + 7);
             p = comma + 1;
-        } else {
-            strncpy(packet, p, sizeof(packet));
-            p = NULL;
         }
-        if (strncmp("sleep=", packet, 6) == 0) {
-            long sleepmillis = atol(packet + 6);
-            struct timespec req = { tv_sec: (sleepmillis / 1000), tv_nsec: (sleepmillis % 1000) * 1000000 };
-            plog("Scenario: sleeping %ld milliseconds", sleepmillis);
-            nanosleep(&req, NULL);
-        } else {
-            ret = send_one_packet(packet, ssl);
-            if (ret != 0) {
-                return ret;
+    }
+
+    start = p;
+
+    for (; repeat > 0; repeat--) {
+        plog("Scenario: %d repeats left", repeat);
+        p = start;
+        while (p) {
+            char *comma = strchr(p, ',');
+            if (comma) {
+                int packet_len = comma - p;
+                memcpy(packet, p, packet_len);
+                packet[packet_len] = '\0';
+                p = comma + 1;
+            } else {
+                strncpy(packet, p, sizeof(packet));
+                p = NULL;
+            }
+            if (strncmp("sleep=", packet, 6) == 0) {
+                long sleepmillis = atol(packet + 6);
+                struct timespec req = { tv_sec: (sleepmillis / 1000), tv_nsec: (sleepmillis % 1000) * 1000000 };
+                plog("Scenario: sleeping %ld milliseconds", sleepmillis);
+                nanosleep(&req, NULL);
+            } else {
+                ret = send_one_packet(packet, ssl);
+                if (ret != 0) {
+                    return ret;
+                }
             }
         }
     }
