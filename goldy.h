@@ -4,6 +4,8 @@
 #define GOLDY_VERSION "0.2"
 #define GOLDY_DAEMON_USER "goldy"
 
+#define DEFAULT_SESSION_TIMEOUT 60
+
 struct instance {
   char *listen_host;
   char *listen_port;
@@ -12,6 +14,7 @@ struct instance {
   char *cert_file;
   char *private_key_file;
   int daemonize;
+  int session_timeout; /* in seconds */
 };
 
 #endif
