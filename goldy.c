@@ -234,15 +234,14 @@ static int global_init(const struct instance *gi, global_context *gc) {
 
   ret = mbedtls_x509_crt_parse_file(&gc->srvcert, gi->cert_file);
   if (ret != 0) {
-    printf(" failed\n  !  mbedtls_x509_crt_parse returned %d\n\n",
-           ret);
+    log_error("mbedtls_x509_crt_parse returned %d",ret);
     goto exit;
   }
   log_debug("Loaded server certificate file");
 
   ret = mbedtls_pk_parse_keyfile(&gc->pkey, gi->private_key_file, NULL);
   if (ret != 0) {
-    printf(" failed\n  !  mbedtls_pk_parse_key returned %d\n\n", ret);
+    log_error("mbedtls_pk_parse_key returned %d", ret);
     goto exit;
   }
   log_debug("Loaded private key file");
@@ -259,9 +258,7 @@ static int global_init(const struct instance *gi, global_context *gc) {
                                          MBEDTLS_SSL_IS_SERVER,
                                          MBEDTLS_SSL_TRANSPORT_DATAGRAM,
                                          MBEDTLS_SSL_PRESET_DEFAULT)) != 0) {
-    mbedtls_printf
-      (" failed\n  ! mbedtls_ssl_config_defaults returned %d\n\n",
-       ret);
+    log_error("mbedtls_ssl_config_defaults returned %d",ret);
     goto exit;
   }
   mbedtls_ssl_conf_rng(&gc->conf, mbedtls_ctr_drbg_random,
@@ -276,15 +273,13 @@ static int global_init(const struct instance *gi, global_context *gc) {
   mbedtls_ssl_conf_ca_chain(&gc->conf, gc->srvcert.next, NULL);
   if ((ret=mbedtls_ssl_conf_own_cert(&gc->conf, &gc->srvcert,
                                      &gc->pkey)) != 0) {
-    printf(" failed\n  ! mbedtls_ssl_conf_own_cert returned %d\n\n",
-           ret);
+    log_error("mbedtls_ssl_conf_own_cert returned %d",ret);
     goto exit;
   }
   if ((ret = mbedtls_ssl_cookie_setup(&gc->cookie_ctx,
                                       mbedtls_ctr_drbg_random,
                                       &gc->ctr_drbg)) != 0) {
-    printf(" failed\n  ! mbedtls_ssl_cookie_setup returned %d\n\n",
-           ret);
+    log_error("mbedtls_ssl_cookie_setup returned %d",ret);
     goto exit;
   }
   mbedtls_ssl_conf_dtls_cookies(&gc->conf, mbedtls_ssl_cookie_write,
@@ -360,7 +355,7 @@ static int session_init(const global_context *gc,
   sc->options = gc->options;
 
   if ((ret = mbedtls_ssl_setup(&sc->ssl, &gc->conf)) != 0) {
-    printf(" failed\n  ! mbedtls_ssl_setup returned %d\n\n", ret);
+    log_error("mbedtls_ssl_setup returned %d", ret);
     goto exit;
   }
   mbedtls_ssl_set_timer_cb(&sc->ssl, &sc->timer,
@@ -379,6 +374,7 @@ static void session_start(session_context *sc, EV_P) {
   ev_io_init(&sc->session_watcher, session_dispatch,
              sc->client_fd.fd, EV_NONE | EV_READ | EV_WRITE);
   sc->session_watcher.data = sc;
+  sc->last_activity = ev_now(EV_A);
   ev_io_start(loop, &sc->session_watcher);
 }
 
@@ -652,6 +648,7 @@ static void session_dispatch(EV_P_ ev_io *w, int revents) {
   }
   session_callbacks[sc->step] (EV_A_ w, sc);
   if ( ev_now(EV_A)-sc->last_activity>sc->options->session_timeout ) {
+    log_debug("session_dispatch - timeout %d %s", ev_now(EV_A),sc->last_activity);
     session_destruct(EV_A_ w,sc,"session timed out");
   }
 }

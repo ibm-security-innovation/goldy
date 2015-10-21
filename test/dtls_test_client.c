@@ -77,7 +77,6 @@ int send_one_packet(const char* packet_body, mbedtls_ssl_context *ssl) {
     unsigned char buf[10000];
 
     plog("sending packet: '%s'", packet_body);
-    fflush( stdout );
 
     len = strlen(packet_body);
 
@@ -120,7 +119,6 @@ int send_one_packet(const char* packet_body, mbedtls_ssl_context *ssl) {
 
     len = ret;
     plog("%d bytes read: '%s'", len, buf);
-    fflush(stdout);
 
     if (is_reverse(packet_body, (char*)buf)) {
         return 0; /* Success */
@@ -222,56 +220,50 @@ int main( int argc, char *argv[] )
     mbedtls_x509_crt_init( &cacert );
     mbedtls_ctr_drbg_init( &ctr_drbg );
 
-    printf( "dtls_test_client: Seeding the random number generator...\n" );
-    fflush( stdout );
+    plog( "dtls_test_client: Seeding the random number generator..." );
 
     mbedtls_entropy_init( &entropy );
     if( ( ret = mbedtls_ctr_drbg_seed( &ctr_drbg, mbedtls_entropy_func, &entropy,
                                (const unsigned char *) pers,
                                strlen( pers ) ) ) != 0 )
     {
-        printf( " failed\n  ! mbedtls_ctr_drbg_seed returned %d\n", ret );
+        plog( " failed! mbedtls_ctr_drbg_seed returned %d", ret );
         goto exit;
     }
 
-    printf( "dtls_test_client: ok\n" );
+    plog( "dtls_test_client: ok" );
 
     /*
      * 0. Load certificates
      */
-    printf( "dtls_test_client: Loading the CA root certificate ...\n" );
-    fflush( stdout );
+    plog( "dtls_test_client: Loading the CA root certificate ..." );
 
     ret = mbedtls_x509_crt_parse( &cacert, (const unsigned char *) mbedtls_test_cas_pem,
                           mbedtls_test_cas_pem_len );
     if( ret < 0 )
     {
-        printf( " failed\n  !  mbedtls_x509_crt_parse returned -0x%x\n\n", -ret );
-        goto exit;
+      plog( "failed!  mbedtls_x509_crt_parse returned -0x%x", -ret );
+      goto exit;
     }
 
-    printf( "dtls_test_client: ok (%d skipped)\n", ret );
+    plog( "dtls_test_client: ok (%d skipped)", ret );
 
-    printf( "dtls_test_client: Connecting to udp %s:%s (SSL hostname: %s)...\n", server_host, server_port, server_ssl_hostname);
-    fflush( stdout );
+    plog( "dtls_test_client: Connecting to udp %s:%s (SSL hostname: %s)...", server_host, server_port, server_ssl_hostname);
 
     if ((ret = mbedtls_net_connect(&server_fd, server_host, server_port, MBEDTLS_NET_PROTO_UDP)) != 0)
     {
-        printf( " failed\n  ! mbedtls_net_connect returned %d\n\n", ret );
+        plog( "failed! mbedtls_net_connect returned %d", ret );
         goto exit;
     }
 
-    printf( "dtls_test_client: ok\n" );
-
-    printf( "dtls_test_client: Setting up the DTLS structure...\n" );
-    fflush( stdout );
+    plog( "dtls_test_client: Setting up the DTLS structure..." );
 
     if( ( ret = mbedtls_ssl_config_defaults( &conf,
                    MBEDTLS_SSL_IS_CLIENT,
                    MBEDTLS_SSL_TRANSPORT_DATAGRAM,
                    MBEDTLS_SSL_PRESET_DEFAULT ) ) != 0 )
     {
-        printf( " failed\n  ! mbedtls_ssl_config_defaults returned %d\n\n", ret );
+        plog( "failed! mbedtls_ssl_config_defaults returned %d", ret );
         goto exit;
     }
 
@@ -286,13 +278,13 @@ int main( int argc, char *argv[] )
 
     if( ( ret = mbedtls_ssl_setup( &ssl, &conf ) ) != 0 )
     {
-        printf( " failed\n  ! mbedtls_ssl_setup returned %d\n\n", ret );
+        plog( "failed! mbedtls_ssl_setup returned %d", ret );
         goto exit;
     }
 
     if( ( ret = mbedtls_ssl_set_hostname( &ssl, server_ssl_hostname ) ) != 0 )
     {
-        printf( " failed\n  ! mbedtls_ssl_set_hostname returned %d\n\n", ret );
+        plog( "failed! mbedtls_ssl_set_hostname returned %d", ret );
         goto exit;
     }
 
@@ -302,10 +294,9 @@ int main( int argc, char *argv[] )
     mbedtls_ssl_set_timer_cb( &ssl, &timer, mbedtls_timing_set_delay,
                                             mbedtls_timing_get_delay );
 
-    printf( "dtls_test_client: ok\n" );
+    plog( "dtls_test_client: ok" );
 
-    printf( "dtls_test_client: Performing the SSL/TLS handshake...\n" );
-    fflush( stdout );
+    plog( "dtls_test_client: Performing the SSL/TLS handshake..." );
 
     do ret = mbedtls_ssl_handshake( &ssl );
     while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
@@ -313,13 +304,13 @@ int main( int argc, char *argv[] )
 
     if( ret != 0 )
     {
-        printf( " failed\n  ! mbedtls_ssl_handshake returned -0x%x\n\n", -ret );
+        plog( "failed! mbedtls_ssl_handshake returned -0x%x", -ret );
         goto exit;
     }
 
-    printf( "dtls_test_client: ok\n" );
+    plog( "dtls_test_client: ok" );
 
-    printf( "dtls_test_client: Verifying peer X.509 certificate...\n" );
+    plog( "dtls_test_client: Verifying peer X.509 certificate..." );
 
     /* In real life, we would have used MBEDTLS_SSL_VERIFY_REQUIRED so that the
      * handshake would not succeed if the peer's cert is bad.  Even if we used
@@ -328,28 +319,28 @@ int main( int argc, char *argv[] )
     {
         char vrfy_buf[512];
 
-        printf( "dtls_test_client: failed\n" );
+        plog( "dtls_test_client: failed" );
 
         mbedtls_x509_crt_verify_info( vrfy_buf, sizeof( vrfy_buf ), "dtls_test_client: ! ", flags );
 
-        printf( "%s", vrfy_buf );
+        plog( "%s", vrfy_buf );
     }
     else
-        printf( "dtls_test_client: ok\n" );
+        plog( "dtls_test_client: ok" );
 
     ret = run_scenario(scenario, &ssl);
     if (ret != 0) {
         goto exit;
     }
 
-    printf( "dtls_test_client: Closing the connection...\n" );
+    plog( "dtls_test_client: Closing the connection..." );
 
     /* No error checking, the connection might be closed already */
     do ret = mbedtls_ssl_close_notify( &ssl );
     while( ret == MBEDTLS_ERR_SSL_WANT_WRITE );
     ret = 0;
 
-    printf( "dtls_test_client: done\n" );
+    plog( "dtls_test_client: done" );
 
 exit:
 
@@ -358,7 +349,7 @@ exit:
     {
         char error_buf[100];
         mbedtls_strerror( ret, error_buf, 100 );
-        printf( "Last error was: %d - %s\n\n", ret, error_buf );
+        plog( "Last error was: %d - %s", ret, error_buf );
     }
 #endif
 
