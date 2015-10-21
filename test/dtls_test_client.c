@@ -23,6 +23,9 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <arpa/inet.h>
 
 #define READ_TIMEOUT_MS 2000
 #define MAX_RETRY       5
@@ -179,6 +182,30 @@ int run_scenario(const char* scenario, mbedtls_ssl_context *ssl) {
     return 0;
 }
 
+int get_source_port(int fd) {
+  union sockaddr_u {
+    struct sockaddr_storage storage;
+    struct sockaddr_in in;
+    struct sockaddr_in6 in6;
+    struct sockaddr sockaddr;
+  } addr;
+  socklen_t addrlen = sizeof(addr.storage);
+
+  if (getsockname(fd, &addr.sockaddr, &addrlen) != 0) {
+      return -1;
+  }
+
+  /* deal with both IPv4 and IPv6: */
+  if (addr.storage.ss_family == AF_INET) {
+    struct sockaddr_in *s_ip4 = &addr.in;
+    return ntohs(s_ip4->sin_port);
+  } else {
+    struct sockaddr_in6 *s_ip6 = &addr.in6;
+    return ntohs(s_ip6->sin6_port);
+  }
+  return -1;
+}
+
 int main( int argc, char *argv[] )
 {
     int ret, exitcode;
@@ -270,6 +297,8 @@ int main( int argc, char *argv[] )
         plog("ERROR: failed! mbedtls_net_connect returned %d", ret);
         goto exit;
     }
+
+    plog("The local client UDP source port is %d", get_source_port(server_fd.fd));
 
     plog("Setting up the DTLS structure...");
 
