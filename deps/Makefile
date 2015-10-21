@@ -6,7 +6,7 @@ build_deps: build_mbedtls build_libev
 
 .PHONY: build_deps
 
-MBEDTLS_VER=2.1.0
+MBEDTLS_VER=2.1.2
 download_mbedtls:
 	curl -O https://tls.mbed.org/download/mbedtls-$(MBEDTLS_VER)-apache.tgz
 	tar xzf mbedtls-$(MBEDTLS_VER)-apache.tgz

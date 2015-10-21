@@ -1,5 +1,5 @@
-MBEDTLS_INC_DIR ?= deps/mbedtls-2.1.0/include
-MBEDTLS_LIB_DIR ?= deps/mbedtls-2.1.0/library
+MBEDTLS_INC_DIR ?= deps/mbedtls-2.1.2/include
+MBEDTLS_LIB_DIR ?= deps/mbedtls-2.1.2/library
 LIBEV_INC_DIR ?= deps/libev-4.20
 LIBEV_LIB_DIR ?= deps/libev-4.20
 
