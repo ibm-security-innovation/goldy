@@ -439,7 +439,6 @@ static int session_connected(session_context *sc) {
 static void session_destruct(EV_P_ ev_io *w,
                                    session_context *sc,
                                    const char* reason) {
-  (void)w;
   log_debug("session_destruct - %s %x %d",reason,sc,sc->client_fd.fd);
   sc->step = GOLDY_SESSION_STEP_DESTRUCTING;
   ev_io_stop(EV_A_ &sc->backend_watcher);
@@ -447,6 +446,7 @@ static void session_destruct(EV_P_ ev_io *w,
 
   session_deinit(sc);
   free(sc);
+  w->data = NULL;
 }
 
 static void session_destruct_after_error(EV_P_ ev_io *w,
@@ -638,6 +638,15 @@ static session_step_cb session_callbacks[GOLDY_SESSION_STEP_LAST] = {
   session_step_destructing
 };
 
+static void session_check_timeout(EV_P_ ev_io *w, session_context *sc) {
+  ev_tstamp now = ev_now(EV_A);
+  if (now - sc->last_activity > sc->options->session_timeout) {
+    log_debug("session_dispatch - timeout: now=%f - last_activity=%f (duration=%f) > timeout=%d",
+              now, sc->last_activity, now - sc->last_activity, sc->options->session_timeout);
+    session_destruct(EV_A_ w,sc,"session timed out");
+  }
+}
+
 static void session_dispatch(EV_P_ ev_io *w, int revents) {
   session_context *sc = (session_context *) w->data;
 
@@ -647,9 +656,9 @@ static void session_dispatch(EV_P_ ev_io *w, int revents) {
               sc->client_fd.fd,revents, sc->step);
   }
   session_callbacks[sc->step] (EV_A_ w, sc);
-  if ( ev_now(EV_A)-sc->last_activity>sc->options->session_timeout ) {
-    log_debug("session_dispatch - timeout %d %s", ev_now(EV_A),sc->last_activity);
-    session_destruct(EV_A_ w,sc,"session timed out");
+
+  if (w->data) {
+      session_check_timeout(EV_A_ w, sc);
   }
 }
 
