@@ -112,7 +112,7 @@ int send_one_packet(const char* packet_body, mbedtls_ssl_context *ssl) {
             return ret;
 
         default:
-            plog("ERROR: mbedtls_ssl_read returned -0x%x", -ret );
+            plog("ERROR: mbedtls_ssl_read returned -0x%x", -ret);
             return ret;
         }
     }
@@ -181,7 +181,7 @@ int run_scenario(const char* scenario, mbedtls_ssl_context *ssl) {
 
 int main( int argc, char *argv[] )
 {
-    int ret;
+    int ret, exitcode;
     mbedtls_net_context server_fd;
     uint32_t flags;
     char scenario[10000] = "";
@@ -239,50 +239,46 @@ int main( int argc, char *argv[] )
     mbedtls_x509_crt_init( &cacert );
     mbedtls_ctr_drbg_init( &ctr_drbg );
 
-    plog( "dtls_test_client: Seeding the random number generator..." );
+    plog("Seeding the random number generator...");
 
     mbedtls_entropy_init( &entropy );
     if( ( ret = mbedtls_ctr_drbg_seed( &ctr_drbg, mbedtls_entropy_func, &entropy,
                                (const unsigned char *) pers,
                                strlen( pers ) ) ) != 0 )
     {
-        plog( " failed! mbedtls_ctr_drbg_seed returned %d", ret );
+        plog("ERROR: failed! mbedtls_ctr_drbg_seed returned %d", ret);
         goto exit;
     }
-
-    plog( "dtls_test_client: ok" );
 
     /*
      * 0. Load certificates
      */
-    plog( "dtls_test_client: Loading the CA root certificate ..." );
+    plog("Loading the CA root certificate ...");
 
     ret = mbedtls_x509_crt_parse( &cacert, (const unsigned char *) mbedtls_test_cas_pem,
                           mbedtls_test_cas_pem_len );
     if( ret < 0 )
     {
-      plog( "failed!  mbedtls_x509_crt_parse returned -0x%x", -ret );
+      plog("ERROR: failed! mbedtls_x509_crt_parse returned -0x%x", -ret);
       goto exit;
     }
 
-    plog( "dtls_test_client: ok (%d skipped)", ret );
-
-    plog( "dtls_test_client: Connecting to udp %s:%s (SSL hostname: %s)...", server_host, server_port, server_ssl_hostname);
+    plog("Connecting to udp %s:%s (SSL hostname: %s)...", server_host, server_port, server_ssl_hostname);
 
     if ((ret = mbedtls_net_connect(&server_fd, server_host, server_port, MBEDTLS_NET_PROTO_UDP)) != 0)
     {
-        plog( "failed! mbedtls_net_connect returned %d", ret );
+        plog("ERROR: failed! mbedtls_net_connect returned %d", ret);
         goto exit;
     }
 
-    plog( "dtls_test_client: Setting up the DTLS structure..." );
+    plog("Setting up the DTLS structure...");
 
     if( ( ret = mbedtls_ssl_config_defaults( &conf,
                    MBEDTLS_SSL_IS_CLIENT,
                    MBEDTLS_SSL_TRANSPORT_DATAGRAM,
                    MBEDTLS_SSL_PRESET_DEFAULT ) ) != 0 )
     {
-        plog( "failed! mbedtls_ssl_config_defaults returned %d", ret );
+        plog("ERROR: failed! mbedtls_ssl_config_defaults returned %d", ret);
         goto exit;
     }
 
@@ -297,13 +293,13 @@ int main( int argc, char *argv[] )
 
     if( ( ret = mbedtls_ssl_setup( &ssl, &conf ) ) != 0 )
     {
-        plog( "failed! mbedtls_ssl_setup returned %d", ret );
+        plog("ERROR: failed! mbedtls_ssl_setup returned %d", ret);
         goto exit;
     }
 
     if( ( ret = mbedtls_ssl_set_hostname( &ssl, server_ssl_hostname ) ) != 0 )
     {
-        plog( "failed! mbedtls_ssl_set_hostname returned %d", ret );
+        plog("ERROR: failed! mbedtls_ssl_set_hostname returned %d", ret);
         goto exit;
     }
 
@@ -313,9 +309,7 @@ int main( int argc, char *argv[] )
     mbedtls_ssl_set_timer_cb( &ssl, &timer, mbedtls_timing_set_delay,
                                             mbedtls_timing_get_delay );
 
-    plog( "dtls_test_client: ok" );
-
-    plog( "dtls_test_client: Performing the SSL/TLS handshake..." );
+    plog("Performing the SSL/TLS handshake...");
 
     do ret = mbedtls_ssl_handshake( &ssl );
     while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
@@ -323,43 +317,34 @@ int main( int argc, char *argv[] )
 
     if( ret != 0 )
     {
-        plog( "failed! mbedtls_ssl_handshake returned -0x%x", -ret );
+        plog("ERROR: failed! mbedtls_ssl_handshake returned -0x%x", -ret);
         goto exit;
     }
 
-    plog( "dtls_test_client: ok" );
-
-    plog( "dtls_test_client: Verifying peer X.509 certificate..." );
+    plog("Verifying peer X.509 certificate...");
 
     /* In real life, we would have used MBEDTLS_SSL_VERIFY_REQUIRED so that the
      * handshake would not succeed if the peer's cert is bad.  Even if we used
      * MBEDTLS_SSL_VERIFY_OPTIONAL, we would bail out here if ret != 0 */
-    if( ( flags = mbedtls_ssl_get_verify_result( &ssl ) ) != 0 )
-    {
+    if( ( flags = mbedtls_ssl_get_verify_result( &ssl ) ) != 0 ) {
         char vrfy_buf[512];
-
-        plog( "dtls_test_client: failed" );
-
-        mbedtls_x509_crt_verify_info( vrfy_buf, sizeof( vrfy_buf ), "dtls_test_client: ! ", flags );
-
-        plog( "%s", vrfy_buf );
+        mbedtls_x509_crt_verify_info( vrfy_buf, sizeof( vrfy_buf ), "! ", flags);
+        plog("Verification failed: %s", vrfy_buf);
+    } else {
+        plog("Certificates ok");
     }
-    else
-        plog( "dtls_test_client: ok" );
 
     ret = run_scenario(scenario, &ssl);
     if (ret != 0) {
         goto exit;
     }
 
-    plog( "dtls_test_client: Closing the connection..." );
+    plog("Closing the connection...");
 
     /* No error checking, the connection might be closed already */
     do ret = mbedtls_ssl_close_notify( &ssl );
     while( ret == MBEDTLS_ERR_SSL_WANT_WRITE );
     ret = 0;
-
-    plog( "dtls_test_client: done" );
 
 exit:
 
@@ -368,7 +353,7 @@ exit:
     {
         char error_buf[100];
         mbedtls_strerror( ret, error_buf, 100 );
-        plog( "Last error was: %d - %s", ret, error_buf );
+        plog("ERROR: Last error was: %d - %s", ret, error_buf );
     }
 #endif
 
@@ -380,5 +365,7 @@ exit:
     mbedtls_ctr_drbg_free( &ctr_drbg );
     mbedtls_entropy_free( &entropy );
 
-    return ret == 0 ? 0 : 1;
+    exitcode = ret == 0 ? 0 : 1;
+    plog("Done, exitcode=%d", exitcode);
+    return exitcode;
 }
