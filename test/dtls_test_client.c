@@ -24,6 +24,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
 
@@ -53,14 +54,9 @@ static void plog(const char* format, ...) {
     fflush(stdout);
 }
 
-static void my_debug( void *ctx, int level,
-                      const char *file, int line,
-                      const char *str )
-{
-    ((void) level);
-
-    fprintf( (FILE *) ctx, "%s:%04d: %s", file, line, str );
-    fflush(  (FILE *) ctx  );
+static void log_mbedtls_debug_callback(void *ctx, int level, const char *file, int line, const char *str) {
+    (void)ctx;
+    plog("mbedtls_deebug [%d] %s:%04d: %s", level, file, line, str);
 }
 
 void print_usage(const char* argv0) {
@@ -327,7 +323,7 @@ int main( int argc, char *argv[] )
     mbedtls_ssl_conf_authmode( &conf, MBEDTLS_SSL_VERIFY_OPTIONAL );
     mbedtls_ssl_conf_ca_chain( &conf, &cacert, NULL );
     mbedtls_ssl_conf_rng( &conf, mbedtls_ctr_drbg_random, &ctr_drbg );
-    mbedtls_ssl_conf_dbg( &conf, my_debug, stdout ); /* TODO remove */
+    mbedtls_ssl_conf_dbg( &conf, log_mbedtls_debug_callback, NULL );
     /* TODO timeouts */
 
     if( ( ret = mbedtls_ssl_setup( &ssl, &conf ) ) != 0 )
@@ -350,11 +346,13 @@ int main( int argc, char *argv[] )
 
     plog("Performing the SSL/TLS handshake...");
 
-    do ret = mbedtls_ssl_handshake( &ssl );
-    while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
-           ret == MBEDTLS_ERR_SSL_WANT_WRITE ||
-           ret == MBEDTLS_ERR_NET_RECV_FAILED
-           );
+    do {
+        ret = mbedtls_ssl_handshake( &ssl );
+        plog(" ... during SSL handshake, ret=%d (WANT_READ=%d, WANT_WRITE=%d, RECV_FAILED=%d",
+             ret, MBEDTLS_ERR_SSL_WANT_READ, MBEDTLS_ERR_SSL_WANT_WRITE, MBEDTLS_ERR_NET_RECV_FAILED);
+    } while (ret == MBEDTLS_ERR_SSL_WANT_READ  ||
+             ret == MBEDTLS_ERR_SSL_WANT_WRITE ||
+             ret == MBEDTLS_ERR_NET_RECV_FAILED);
 
     if( ret != 0 )
     {
