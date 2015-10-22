@@ -30,6 +30,15 @@ QUIET_CC   = @echo "  CC    $@" 1>&2;
 QUIET_LINK = @echo "  LINK  $@" 1>&2;
 endif
 
+INDENT_SETTINGS = -br -brf -brs -ce -cli2 -di1 -i2 -l100 -nbad -ncs -npcs -nprs \
+		  -npsl -nut -T session_context -T global_context -T ev_io
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+	INDENT = gnuindent $(INDENT_SETTINGS)
+else
+	INDENT = indent $(INDENT_SETTINGS)
+endif
+
 APP = goldy
 OBJS = goldy.o daemonize.o log.o
 
@@ -39,7 +48,10 @@ TEST_CLIENT_OBJS = test/dtls_test_client.o
 TEST_SERVER = test/udp_test_server
 TEST_SERVER_OBJS = test/udp_test_server.o
 
-.PHONY: all clean distclean deps test
+SRCS_C = $(OBJS:.o=.c) $(TEST_CLIENT_OBJS:.o=.c) $(TEST_SERVER_OBJS:.o=.c)
+SRCS_H = $(OBJS:.o=.h)
+
+.PHONY: all clean distclean deps test format
 
 all: $(APP)
 
@@ -85,3 +97,6 @@ test/keys/test-proxy-cert.pem: test/keys/test-proxy-key.pem
 	$(MBEDTLS_INC_DIR)/../programs/x509/cert_write \
 		issuer_name="CN=goldy.local, O=Dummy Ltd, C=US" \
 		selfsign=1 issuer_key=$< output_file=$@
+
+format:
+	$(INDENT) $(SRCS_C) $(SRCS_H)
