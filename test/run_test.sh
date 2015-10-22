@@ -201,8 +201,10 @@ run_concurrent_client_scenarios 7 "10 identical parallel clients with 4 small pa
 failures=$((failures+$?))
 
 run_concurrent_client_scenarios 8 "4 small clients and 4 big clients (all in parallel)" \
-  "$four_packets" "$three_big_packets" "$four_packets" "$three_big_packets" \
-  "$four_packets" "$three_big_packets" "$four_packets" "$three_big_packets"
+  "repeat=5,$four_packets" "repeat=5,$three_big_packets" \
+  "repeat=5,$four_packets" "repeat=5,$three_big_packets" \
+  "repeat=5,$four_packets" "repeat=5,$three_big_packets" \
+  "repeat=5,$four_packets" "repeat=5,$three_big_packets"
 failures=$((failures+$?))
 
 cleanup

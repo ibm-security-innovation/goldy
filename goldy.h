@@ -14,7 +14,7 @@ struct instance {
   char *cert_file;
   char *private_key_file;
   int daemonize;
-  int session_timeout; /* in seconds */
+  int session_timeout;          /* in seconds */
 };
 
 #endif
