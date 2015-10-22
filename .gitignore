@@ -1,6 +1,7 @@
 /goldy
 /*.o
 /test/dtls_test_client
+/test/udp_test_server
 /test/*.o
 /deps/mbedtls-*
 /deps/libev-*

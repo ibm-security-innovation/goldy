@@ -33,7 +33,8 @@ info (`-g3`).
 
 ## Tests
 
-To compile the test client run the test suite:
+The following command compiles the test client and server and then runs the
+full-cycle test suite:
 
     make test
 

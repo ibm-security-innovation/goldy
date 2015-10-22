@@ -33,8 +33,11 @@ endif
 APP = goldy
 OBJS = goldy.o daemonize.o log.o
 
-TEST_APP = test/dtls_test_client
-TEST_OBJS = test/dtls_test_client.o
+TEST_CLIENT = test/dtls_test_client
+TEST_CLIENT_OBJS = test/dtls_test_client.o
+
+TEST_SERVER = test/udp_test_server
+TEST_SERVER_OBJS = test/udp_test_server.o
 
 .PHONY: all clean distclean deps test
 
@@ -43,7 +46,10 @@ all: $(APP)
 $(APP): $(OBJS) $(MBEDTLS_LIBS) $(LIBEV_LIBS)
 	$(LINK) -o $@ $^
 
-$(TEST_APP): $(TEST_OBJS) $(MBEDTLS_LIBS)
+$(TEST_CLIENT): $(TEST_CLIENT_OBJS) $(MBEDTLS_LIBS)
+	$(LINK) -o $@ $^
+
+$(TEST_SERVER): $(TEST_SERVER_OBJS) $(LIBEV_LIBS)
 	$(LINK) -o $@ $^
 
 %.o: %.c $(MBEDTLS_CONFIG_INC)
@@ -60,7 +66,7 @@ $(MBEDTLS_CONFIG_INC):
 	@false
 
 clean:
-	rm -f $(APP) $(OBJS) $(TEST_APP) $(TEST_OBJS)
+	rm -f $(APP) $(OBJS) $(TEST_CLIENT) $(TEST_CLIENT_OBJS) $(TEST_SERVER) $(TEST_SERVER_OBJS)
 
 distclean: clean
 	$(MAKE) -C deps distclean
@@ -68,7 +74,7 @@ distclean: clean
 deps:
 	$(MAKE) -C deps download_deps build_deps
 
-test: $(TEST_APP) test/keys/test-proxy-key.pem test/keys/test-proxy-cert.pem
+test: $(TEST_CLIENT) $(TEST_SERVER) test/keys/test-proxy-key.pem test/keys/test-proxy-cert.pem
 	test/run_test.sh
 
 test/keys/test-proxy-key.pem:

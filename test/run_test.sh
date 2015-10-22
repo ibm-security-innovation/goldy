@@ -79,7 +79,7 @@ kill_goldy() {
 kill_backend() {
   log "Killing backend test server (PID $backendpid)"
   if [ $pkill_processes = 1 ] ; then
-    pkill -f udp_test_server.pl
+    pkill udp_test_server
   else
     kill $backendpid
     wait $backendpid
@@ -154,9 +154,9 @@ goldypid=$!
 
 log "Starting test UDP backend server..."
 if [ $keep_test_stderr == 1 ]; then
-  test/udp_test_server.pl -b $BACKENDHOST:$BACKENDPORT &
+  test/udp_test_server -p $BACKENDPORT &
 else
-  test/udp_test_server.pl -b $BACKENDHOST:$BACKENDPORT > test/log/test_server.log 2>&1 &
+  test/udp_test_server -p $BACKENDPORT > test/log/test_server.log 2>&1 &
 fi
 backendpid=$!
 
