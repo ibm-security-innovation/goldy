@@ -33,12 +33,22 @@
 #define DEBUG_LEVEL 0
 
 static void plog(const char* format, ...) {
-    char newformat[1024];
     va_list arglist;
+    char line[1024];
+    struct timeval tv;
+    size_t len;
+
+    gettimeofday(&tv, NULL);
+    len = strftime(line, sizeof(line), "%Y-%m-%d %H:%M:%S", localtime(&tv.tv_sec));
+#if defined(__APPLE__) && defined(__MACH__)
+    len += snprintf(line + len, sizeof(line) - len, ".%06d ", tv.tv_usec);
+#else
+    len += snprintf(line + len, sizeof(line) - len, ".%06lu ", tv.tv_usec);
+#endif
 
     va_start(arglist, format);
-    snprintf(newformat, sizeof(newformat), "dtls_test_client(PID=%d): %s\n", getpid(), format);
-    vprintf(newformat, arglist);
+    snprintf(line+len, sizeof(line), "dtls_test_client(PID=%d): %s\n", getpid(), format);
+    vprintf(line, arglist);
     va_end(arglist);
     fflush(stdout);
 }
@@ -342,7 +352,9 @@ int main( int argc, char *argv[] )
 
     do ret = mbedtls_ssl_handshake( &ssl );
     while( ret == MBEDTLS_ERR_SSL_WANT_READ ||
-           ret == MBEDTLS_ERR_SSL_WANT_WRITE );
+           ret == MBEDTLS_ERR_SSL_WANT_WRITE ||
+           ret == MBEDTLS_ERR_NET_RECV_FAILED
+           );
 
     if( ret != 0 )
     {

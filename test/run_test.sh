@@ -16,7 +16,7 @@ OPTIONS:
    -l      keep log files after running
    -k      kill processes using pkill
    -s      skip log (keep stderr)
-   -t      skip test client log (keep test client stderr)
+   -t      skip test client/server log (keep test client/server stderr)
 EOF
 
 }
@@ -24,7 +24,7 @@ EOF
 keep_log_files=0
 pkill_processes=0
 keep_stderr=0
-keep_test_client_stderr=0
+keep_test_stderr=0
 
 while getopts "klst" OPTION
 do
@@ -42,7 +42,7 @@ do
       echo "Will not capture stderr"
       ;;
     t)
-      keep_test_client_stderr=1
+      keep_test_stderr=1
       echo "Will not capture stderr for test client(s)"
       ;;
     h)
@@ -110,10 +110,10 @@ run_concurrent_client_scenarios() {
   testnum=$1
   description=$2
   clients_scenarios=${@:3}
-
+  echo "=============================================== concurrent scenarios"
   pids=""
   for scenario in $clients_scenarios ; do
-    if [ $keep_test_client_stderr == 1 ]; then
+    if [ $keep_test_stderr == 1 ]; then
       test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -s "$scenario" &
     else
       test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -s "$scenario" >> test/log/test_client.log 2>&1 &
@@ -131,7 +131,7 @@ run_concurrent_client_scenarios() {
       exitcode=1
     fi
   done
-
+  echo "=============================================== results"
   if [ $exitcode != 0 ] ; then
     echo "not ok $testnum - $description"
     return 1
@@ -153,7 +153,11 @@ fi
 goldypid=$!
 
 log "Starting test UDP backend server..."
-test/udp_test_server.pl -b $BACKENDHOST:$BACKENDPORT > test/log/test_server.log 2>&1 &
+if [ $keep_test_stderr == 1 ]; then
+  test/udp_test_server.pl -b $BACKENDHOST:$BACKENDPORT &
+else
+  test/udp_test_server.pl -b $BACKENDHOST:$BACKENDPORT > test/log/test_server.log 2>&1 &
+fi
 backendpid=$!
 
 log "Waiting for goldy and backend server to start..."
