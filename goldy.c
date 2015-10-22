@@ -468,10 +468,10 @@ static void session_reset(EV_P_ ev_io *w,
 
 
 
-static void session_step_handshake(EV_P_ ev_io *w,
-                                       session_context *sc) {
+static void session_step_handshake(EV_P_ ev_io *w,int revents,
+                                   session_context *sc) {
   int ret = mbedtls_ssl_handshake(&sc->ssl);
-
+  (void)revents;
   switch (ret) {
     case MBEDTLS_ERR_SSL_WANT_READ:
     case MBEDTLS_ERR_SSL_WANT_WRITE:
@@ -495,9 +495,9 @@ static void session_step_handshake(EV_P_ ev_io *w,
   }
 }
 
-static void session_step_read(EV_P_ ev_io *w, session_context *sc) {
+static void session_step_read(EV_P_ ev_io *w, int revents, session_context *sc) {
   int ret;
-
+  (void)revents;
   sc->len = sizeof(sc->buf) - 1;
   memset(sc->buf, 0, sizeof(sc->buf));
 
@@ -545,8 +545,9 @@ static void session_step_read(EV_P_ ev_io *w, session_context *sc) {
   }
 }
 
-static void session_step_send_backend(EV_P_ ev_io *w,session_context *sc) {
+static void session_step_send_backend(EV_P_ ev_io *w,int revents,session_context *sc) {
   int ret = mbedtls_net_send(&sc->backend_fd, sc->buf, sc->len);
+  (void)revents;
   if (ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
     sc->last_activity = ev_now(EV_A);
     return;
@@ -561,9 +562,10 @@ static void session_step_send_backend(EV_P_ ev_io *w,session_context *sc) {
   return;
 }
 
-static void session_step_receive_backend(EV_P_ ev_io *w,
+static void session_step_receive_backend(EV_P_ ev_io *w, int revents,
                                          session_context *sc) {
   int ret;
+  (void)revents;
 
   sc->len = sizeof(sc->buf) - 1;
   memset(sc->buf, 0, sizeof(sc->buf));
@@ -573,7 +575,7 @@ static void session_step_receive_backend(EV_P_ ev_io *w,
     return;
   }
   if (ret < 0) {
-    return session_destruct_after_error(EV_A_ w, sc, ret, "session_step_send_backend");
+    return session_destruct_after_error(EV_A_ w, sc, ret, "session_step_receive_backend");
   }
   log_debug("(%s:%d) %d bytes received from backend server",
             sc->client_ip_str, sc->client_port, ret);
@@ -583,9 +585,10 @@ static void session_step_receive_backend(EV_P_ ev_io *w,
 }
 
 
-static void session_step_write(EV_P_ ev_io *w,
+static void session_step_write(EV_P_ ev_io *w, int revents,
                                    session_context *sc) {
   int ret = mbedtls_ssl_write(&sc->ssl, sc->buf, sc->len);
+  (void)revents;
 
   switch (ret) {
     case MBEDTLS_ERR_SSL_WANT_READ:
@@ -608,9 +611,10 @@ static void session_step_write(EV_P_ ev_io *w,
 
 }
 
-static void session_step_close_notify(EV_P_ ev_io *w,
+static void session_step_close_notify(EV_P_ ev_io *w, int revents,
                                           session_context *sc) {
   int ret = mbedtls_ssl_close_notify(&sc->ssl);
+  (void)revents;
 
   if (ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
     return;
@@ -618,14 +622,15 @@ static void session_step_close_notify(EV_P_ ev_io *w,
   session_destruct(EV_A_ w, sc, "close_notify");
 }
 
-static void session_step_destructing(EV_P_ ev_io *w,
+static void session_step_destructing(EV_P_ ev_io *w, int revents,
                                      session_context *sc) {
   (void)loop;
   (void)w;
+  (void)revents;
   (void)sc;
 }
 
-typedef void (*session_step_cb) (EV_P_ ev_io *w,
+typedef void (*session_step_cb) (EV_P_ ev_io *w, int revents,
                                   session_context *sc);
 
 static session_step_cb session_callbacks[GOLDY_SESSION_STEP_LAST] = {
@@ -646,7 +651,7 @@ static void session_dispatch(EV_P_ ev_io *w, int revents) {
     log_debug("(%s:%d:%d) session_dispatch events:%x step:%d", sc->client_ip_str, sc->client_port,
               sc->client_fd.fd,revents, sc->step);
   }
-  session_callbacks[sc->step] (EV_A_ w, sc);
+  session_callbacks[sc->step] (EV_A_ w, revents, sc);
   if ( ev_now(EV_A)-sc->last_activity>sc->options->session_timeout ) {
     log_debug("session_dispatch - timeout %d %s", ev_now(EV_A),sc->last_activity);
     session_destruct(EV_A_ w,sc,"session timed out");
@@ -670,7 +675,7 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
     log_debug("(%d) global_cb events: %d",w->fd,revents);
   }
 
-  if (gc->step == GOLDY_GLOBAL_STEP_ACCEPT) {
+  if (gc->step == GOLDY_GLOBAL_STEP_ACCEPT && (revents & EV_READ)) {
     mbedtls_net_context client_fd;
     unsigned char client_ip[16];
     size_t cliip_len;
