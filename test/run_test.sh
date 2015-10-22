@@ -67,7 +67,7 @@ log() {
 
 kill_goldy() {
   log "Killing goldy (PID $goldypid)"
-  if [ $pkill_processes ] ; then
+  if [ $pkill_processes = 1 ] ; then
     pkill goldy
   else
     kill $goldypid
@@ -78,7 +78,7 @@ kill_goldy() {
 
 kill_backend() {
   log "Killing backend test server (PID $backendpid)"
-  if [ $pkill_processes ] ; then
+  if [ $pkill_processes = 1 ] ; then
     pkill -f udp_test_server.pl
   else
     kill $backendpid
