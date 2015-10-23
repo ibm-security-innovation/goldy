@@ -26,6 +26,7 @@
 
 #include "ev.h"
 
+#include <errno.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -38,6 +39,8 @@
 #include "daemonize.h"
 #include "log.h"
 
+/* Raise this value to have more verbose logging from mbedtls functions */
+#define MBEDTLS_DEBUG_LOGGING_LEVEL 0
 
 static void print_version() {
   printf("goldy %s\n", GOLDY_VERSION);
@@ -215,6 +218,12 @@ static int bind_listen_fd(global_context *gc) {
   return 0;
 }
 
+static void log_mbedtls_debug_callback(void *ctx, int level, const char *file, int line,
+                                       const char *str) {
+  (void)ctx;
+  log_debug("mbedtls_debug [%d] %s:%04d: %s", level, file, line, str);
+}
+
 static int global_init(const struct instance *gi, global_context *gc) {
   int ret;
 
@@ -268,6 +277,10 @@ static int global_init(const struct instance *gi, global_context *gc) {
     log_error("mbedtls_ssl_config_defaults returned %d", ret);
     goto exit;
   }
+
+  mbedtls_ssl_conf_dbg(&gc->conf, log_mbedtls_debug_callback, NULL);
+  mbedtls_debug_set_threshold(MBEDTLS_DEBUG_LOGGING_LEVEL);
+
   mbedtls_ssl_conf_rng(&gc->conf, mbedtls_ctr_drbg_random, &gc->ctr_drbg);
 
 #if defined(MBEDTLS_SSL_CACHE_C)
@@ -334,8 +347,9 @@ static void session_dispatch(EV_P_ ev_io *w, int revents);
 
 static int session_init(const global_context *gc,
                         session_context *sc,
-                        const mbedtls_net_context * client_fd,
-                        unsigned char client_ip[16], size_t cliip_len) {
+                        const mbedtls_net_context *client_fd,
+                        unsigned char client_ip[16], size_t cliip_len,
+                        const unsigned char* first_packet, size_t first_packet_len) {
   int ret;
 
   memset(sc, 0, sizeof(*sc));
@@ -352,20 +366,26 @@ static int session_init(const global_context *gc,
   sc->options = gc->options;
 
   if ((ret = mbedtls_ssl_setup(&sc->ssl, &gc->conf)) != 0) {
-    log_error("mbedtls_ssl_setup returned %d", ret);
-    goto exit;
+    check_return_code(ret, "session_init - mbedtls_ssl_steup");
+    return 1;
   }
   mbedtls_ssl_set_timer_cb(&sc->ssl, &sc->timer,
                            mbedtls_timing_set_delay,
                            mbedtls_timing_get_delay);
-exit:
-  check_return_code(ret, "session_init - exit");
-  return ret == 0 ? 0 : 1;
+
+  /* We already read the first packet of the SSL session from the network in
+   * the initial recvfrom() call on the listening fd. Here we copy the content
+   * of that packet into the SSL incoming data buffer so it'll be consumed on
+   * the next call to mbedtls_ssl_fetch_input(). */
+  memcpy(sc->ssl.in_hdr, first_packet, first_packet_len);
+  sc->ssl.in_left = first_packet_len;
+
+  return 0;
 }
 
 static void session_start(session_context *sc, EV_P) {
   ev_io_init(&sc->session_watcher, session_dispatch,
-             sc->client_fd.fd, EV_NONE | EV_READ | EV_WRITE);
+             sc->client_fd.fd, EV_READ | EV_WRITE);
   sc->session_watcher.data = sc;
   sc->last_activity = ev_now(EV_A);
   ev_io_start(loop, &sc->session_watcher);
@@ -459,8 +479,6 @@ static void session_reset(EV_P_ ev_io *w, session_context *sc) {
   ev_io_stop(EV_A_ & sc->session_watcher);
 }
 
-
-
 static void session_step_handshake(EV_P_ ev_io *w, int revents,
                                    session_context *sc) {
   int ret = mbedtls_ssl_handshake(&sc->ssl);
@@ -469,6 +487,8 @@ static void session_step_handshake(EV_P_ ev_io *w, int revents,
   switch (ret) {
     case MBEDTLS_ERR_SSL_WANT_READ:
     case MBEDTLS_ERR_SSL_WANT_WRITE:
+      log_debug("(%s:%d) DTLS handshake in-progress, ret=%d", sc->client_ip_str,
+                sc->client_port, ret);
       sc->last_activity = ev_now(EV_A);
       return;
 
@@ -665,8 +685,8 @@ static void session_dispatch(EV_P_ ev_io *w, int revents) {
   session_context *sc = (session_context *)w->data;
   static int count = 0;
 
-  if (revents != EV_WRITE || count%7==0) {
-    log_debug("(%s:%d) session_dispatch fds: %d,%d,%d events:%x step:%d",
+  if (revents != EV_WRITE || count%100000==0) {
+    log_debug("(%s:%d) session_dispatch fds: %d,%d,%d revents:0x%02x step:%d",
               sc->client_ip_str, sc->client_port,
               sc->client_fd.fd,
               sc->backend_fd.fd,
@@ -684,79 +704,128 @@ static void session_dispatch(EV_P_ ev_io *w, int revents) {
 
 static void start_listen_io(EV_P_ ev_io *w, global_context *gc) {
   log_debug("start_listen_io - %d", gc->listen_fd.fd);
-  ev_io_init(w, global_cb, gc->listen_fd.fd, EV_READ | EV_WRITE);
+  ev_io_init(w, global_cb, gc->listen_fd.fd, EV_READ);
   w->data = gc;
   ev_io_start(EV_A_ w);
+}
+
+static int connect_to_new_client(mbedtls_net_context* client_fd,
+                                 const struct sockaddr_storage *client_addr,
+                                 const socklen_t client_addr_size,
+                                 const struct sockaddr_storage *local_addr,
+                                 const socklen_t local_addr_size) {
+    int ret = 0;
+    int one = 1;
+
+    mbedtls_net_init(client_fd);
+    client_fd->fd = socket(client_addr->ss_family, SOCK_DGRAM, IPPROTO_UDP);
+    if (client_fd->fd < 0) {
+      log_error("socket() failed errno=%d", ret, errno);
+      return 1;
+    }
+
+    ret = setsockopt(client_fd->fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, sizeof(one));
+    if (ret != 0) {
+      log_error("setsockopt() failed ret=%d errno=%d", ret, errno);
+      return 1;
+    }
+
+    ret = bind(client_fd->fd, (struct sockaddr *)local_addr, local_addr_size);
+    if (ret != 0) {
+      log_error("bind() failed ret=%d errno=%d", ret, errno);
+      return 1;
+    }
+
+    ret = connect(client_fd->fd, (struct sockaddr *)client_addr, client_addr_size);
+    if (ret != 0) {
+      log_error("connect() failed ret=%d errno=%d", ret, errno);
+      return 1;
+    }
+    mbedtls_net_set_nonblock(client_fd);
+    log_debug("connect_to_new_client: connected on fd %d", client_fd->fd);
+    return 0;
 }
 
 static void global_cb(EV_P_ ev_io *w, int revents) {
   global_context *gc = (global_context *)w->data;
   static int count = 0;
-
   int ret = 0;
+  struct sockaddr_storage local_addr;
+  socklen_t local_addr_size = sizeof(local_addr);
 
-  if (revents != EV_WRITE || count%100000==0) {
-    log_debug("global_cb fds: %d,%d events: %d", w->fd, gc->listen_fd.fd, revents);
-  }
+  log_debug("global_cb fds: %d,%d revents: 0x%02x count: %d", w->fd, gc->listen_fd.fd, revents, count);
   count++;
-  if (gc->step == GOLDY_GLOBAL_STEP_ACCEPT && (revents & EV_READ)) {
+
+  ret = getsockname(gc->listen_fd.fd, (struct sockaddr *)&local_addr, &local_addr_size);
+  if (ret < 0) {
+    log_error("getsockname() failed errno=%d", ret, errno);
+    return;
+  }
+
+  /* Read all the incoming packets waiting on listen_fd, and create a session for each one */
+  for (;;) {
     mbedtls_net_context client_fd;
-
-    unsigned char client_ip[16];
-
-    size_t cliip_len;
-
     session_context *sc;
+    struct sockaddr_storage client_addr;
+    socklen_t client_addr_size = sizeof(client_addr);
+    unsigned char first_packet[MBEDTLS_SSL_MAX_CONTENT_LEN];
+    size_t first_packet_len = 0;
 
-    mbedtls_net_init(&client_fd);
-    if ((ret = mbedtls_net_accept(&gc->listen_fd, &client_fd,
-                                  client_ip, sizeof(client_ip),
-                                  &cliip_len)) != 0) {
-      if ( ret==MBEDTLS_ERR_SSL_WANT_READ ) {
+    ret = recvfrom(gc->listen_fd.fd, first_packet, sizeof(first_packet), 0,
+                   (struct sockaddr *)&client_addr, &client_addr_size);
+    if (ret < 0) {
+      int save_errno = errno;
+      if ((save_errno == EAGAIN) || (save_errno == EWOULDBLOCK)) {
+        /* We finished reading everything that was available so far */
         return;
       }
-      check_return_code(ret,"global_cb - accept");
+      log_error("recvfrom failed on listening socket (fd=%d), errno=%d", gc->listen_fd.fd,
+                save_errno);
       return;
+    } else if (ret == 0) {
+      log_error("recvfrom() returned 0, this shouldn't happen");
+      continue;
     }
-    /*
-     *mbedtls_net_accept replaces the listening sock :) So we need to bind
-     *it again to libev
-     */
-    ev_io_stop(EV_A_ w);
-    log_debug("global_cb - switching %d->%d", client_fd.fd, gc->listen_fd.fd);
-    mbedtls_net_set_nonblock(&gc->listen_fd);
-    start_listen_io(EV_A_ w, gc);
+
+    first_packet_len = ret;
+
+    /* We have a new client! Connect the client_fd socket to that peer */
+    ret = connect_to_new_client(&client_fd,
+                                &client_addr, client_addr_size,
+                                &local_addr, local_addr_size);
+    if (ret != 0) {
+      log_error("connect_to_new_client failed");
+      continue;
+    }
 
     sc = malloc(sizeof(session_context));
 
-    /* there is no need to call mbedtls_net_set_nonblock on the client_fd, as it is actually the previous
-       listening fd which is already non blocking */
-    session_init(gc, sc, &client_fd, client_ip, cliip_len);
+    session_init(gc, sc, &client_fd, (unsigned char *)&client_addr, client_addr_size,
+                 first_packet, first_packet_len);
 
     if (session_connected(sc) != 0) {
       log_error("can't init client connection");
       free(sc);
-      return;
+      continue;
     }
-    /*
-     *mbedtls_net_accept replaces the listening sock :) So we need to bind
-     *it again to libev
-     */
+
+    /* Start listening for network events on the new client fd */
     session_start(sc, EV_A);
-    log_debug("global_cb - session_start");
-    return;
+    log_debug("global_cb - session_start - client_fd %d", sc->client_fd.fd);
+
+    /* Trigger a simulated EV_READ event to cause the session callback to consume the fisrt
+     * packet (which was already inserted into the SSL buffers in session_init()). */
+    ev_feed_fd_event(loop, sc->client_fd.fd, EV_READ);
   }
 }
 
-
 static int main_loop(global_context *gc) {
+  ev_io global_watcher;
   struct ev_loop *loop = ev_default_loop(0);
 
-  ev_io global_watcher;
-
-
   log_info("main_loop - start");
-  start_listen_io(EV_A_ & global_watcher, gc);
+  gc->step = GOLDY_GLOBAL_STEP_ACCEPT;
+  start_listen_io(EV_A_ &global_watcher, gc);
   ev_loop(EV_A_ 0);
 
   log_info("main_loop - exit");
@@ -765,7 +834,6 @@ static int main_loop(global_context *gc) {
 
 int main(int argc, char **argv) {
   struct instance gi;
-
   global_context gc;
 
   int ret = 0;
