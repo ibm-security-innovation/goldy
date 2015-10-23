@@ -45,7 +45,7 @@ static void reverse_in_place(char *buf, int len) {
   }
 }
 
-typedef struct session_context {
+typedef struct {
   int fd;
   struct sockaddr_in peer_addr;
   int client_port;
@@ -55,8 +55,8 @@ typedef struct session_context {
   ev_timer send_response_timer;
 } session_context;
 
-static void send_response_callback(EV_P_ ev_timer *w, int revents) {
-  struct session_context* session;
+static void send_response_callback(EV_P_ ev_timer * w, int revents) {
+  session_context *session;
   ssize_t sent_len;
 
   (void)loop;
@@ -64,7 +64,8 @@ static void send_response_callback(EV_P_ ev_timer *w, int revents) {
   session = w->data;
 
   reverse_in_place(session->buf, session->recv_len);
-  sent_len = sendto(session->fd, session->buf, session->recv_len, 0, (struct sockaddr *)&session->peer_addr, sizeof(session->peer_addr));
+  sent_len = sendto(session->fd, session->buf, session->recv_len, 0,
+                    (struct sockaddr *)&session->peer_addr, sizeof(session->peer_addr));
   if (sent_len < 0) {
     plog("ERROR in sendto() - returned %d", sent_len);
   } else if (sent_len != session->recv_len) {
@@ -73,21 +74,22 @@ static void send_response_callback(EV_P_ ev_timer *w, int revents) {
     plog("Sent to   %s:%d - '%s'", session->client_ip_str, session->client_port, session->buf);
   }
 
+  ev_timer_stop(loop, w);
   free(session);
-  w->data = NULL;
+  /* Must not use 'w' here because it points to the freed memory */
 }
 
-static ev_tstamp get_delay_ms_from_buffer(const char* buf) {
-    long delay_ms;
+static ev_tstamp get_delay_ms_from_buffer(const char *buf) {
+  long delay_ms;
 
-    if (strncmp("delay=", buf, 6) != 0) {
-        return 0.0;
-    }
-    delay_ms = atol(buf + 6);
-    if (delay_ms < 0) {
-        return 0.0;
-    }
-    return (ev_tstamp)delay_ms / 1000.0;
+  if (strncmp("serverdelay=", buf, 12) != 0) {
+    return 0.0;
+  }
+  delay_ms = atol(buf + 12);
+  if (delay_ms < 0) {
+    return 0.0;
+  }
+  return (ev_tstamp) delay_ms / 1000.0;
 }
 
 static void handle_udp_packet(EV_P_ ev_io *w, int revents) {
@@ -97,12 +99,12 @@ static void handle_udp_packet(EV_P_ ev_io *w, int revents) {
   ssize_t recv_len;
   int client_port;
   char client_ip_str[100];
-  session_context* session;
+  session_context *session;
   ev_tstamp response_delay;
 
   assert(revents & EV_READ);
-  recv_len =
-    recvfrom(w->fd, buf, sizeof(buf) - 1, 0, (struct sockaddr *)&peer_addr, &peer_addr_len);
+  recv_len = recvfrom(w->fd, buf, sizeof(buf) - 1, 0,
+                      (struct sockaddr *)&peer_addr, &peer_addr_len);
   if (recv_len < 0) {
     plog("Weird! handle_udp_packet called but recvfrom() failed (returned %d)", recv_len);
     return;
@@ -113,7 +115,7 @@ static void handle_udp_packet(EV_P_ ev_io *w, int revents) {
   inet_ntop(AF_INET, &peer_addr.sin_addr, client_ip_str, sizeof(client_ip_str));
   plog("Recv from %s:%d - '%s'", client_ip_str, client_port, buf);
 
-  session = malloc(sizeof(session_context));
+  session = calloc(1, sizeof(session_context));
   session->fd = w->fd;
   memcpy(&session->peer_addr, &peer_addr, sizeof(session->peer_addr));
   session->client_port = client_port;
