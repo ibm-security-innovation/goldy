@@ -28,8 +28,7 @@
 #include <sys/types.h>
 #include <arpa/inet.h>
 
-#define READ_TIMEOUT_MS 2000
-#define MAX_RETRY       5
+#define SSL_HANDSHAKE_TIMEOUT_MILLISECS 4000
 
 #define DEBUG_LEVEL 0
 
@@ -57,16 +56,24 @@ static void plog(const char *format, ...) {
 static void log_mbedtls_debug_callback(void *ctx, int level, const char *file, int line,
                                        const char *str) {
   (void)ctx;
-  plog("mbedtls_deebug [%d] %s:%04d: %s", level, file, line, str);
+  plog("mbedtls_debug [%d] %s:%04d: %s", level, file, line, str);
 }
 
-void print_usage(const char *argv0) {
+static void print_usage(const char *argv0) {
   printf("Usage: %s -h host -p port [-n ssl_hostname] -s scenario\n", argv0);
   exit(1);
 }
 
+static long timeval_to_ms(struct timeval *tv) {
+  return (long)tv->tv_sec * 1000 + (long)tv->tv_usec / 1000;
+}
+
+static long duration_ms(struct timeval *tv_end, struct timeval *tv_start) {
+  return timeval_to_ms(tv_end) - timeval_to_ms(tv_start);
+}
+
 /* Return 1 if a equals to reverse(b) */
-int is_reverse(const char *a, const char *b) {
+static int is_reverse(const char *a, const char *b) {
   size_t len = strlen(a);
   size_t i = 0;
 
@@ -82,7 +89,7 @@ int is_reverse(const char *a, const char *b) {
   return 1;
 }
 
-int send_one_packet(const char *packet_body, mbedtls_ssl_context * ssl) {
+static int send_one_packet(const char *packet_body, mbedtls_ssl_context *ssl) {
   int ret, len;
   unsigned char buf[10000];
 
@@ -136,7 +143,7 @@ int send_one_packet(const char *packet_body, mbedtls_ssl_context * ssl) {
   return -1;
 }
 
-int run_scenario(const char *scenario, mbedtls_ssl_context * ssl) {
+int run_scenario(const char *scenario, mbedtls_ssl_context *ssl) {
   int ret;
   int repeat = 1;
   const char *p = scenario;
@@ -189,7 +196,7 @@ int run_scenario(const char *scenario, mbedtls_ssl_context * ssl) {
   return 0;
 }
 
-int get_source_port(int fd) {
+static int get_source_port(int fd) {
   union sockaddr_u {
     struct sockaddr_storage storage;
     struct sockaddr_in in;
@@ -223,6 +230,7 @@ int main(int argc, char *argv[]) {
   char server_ssl_hostname[100] = "";
   const char *pers = "dtls_client";
   int opt;
+  struct timeval t0, t1;
 
   mbedtls_entropy_context entropy;
   mbedtls_ctr_drbg_context ctr_drbg;
@@ -338,12 +346,21 @@ int main(int argc, char *argv[]) {
 
   plog("Performing the SSL/TLS handshake...");
 
+  gettimeofday(&t0, NULL);
   do {
     ret = mbedtls_ssl_handshake(&ssl);
     plog(" ... during SSL handshake, ret=%d (WANT_READ=%d, WANT_WRITE=%d, RECV_FAILED=%d",
          ret, MBEDTLS_ERR_SSL_WANT_READ, MBEDTLS_ERR_SSL_WANT_WRITE, MBEDTLS_ERR_NET_RECV_FAILED);
-  } while (ret == MBEDTLS_ERR_SSL_WANT_READ ||
-           ret == MBEDTLS_ERR_SSL_WANT_WRITE || ret == MBEDTLS_ERR_NET_RECV_FAILED);
+    gettimeofday(&t1, NULL);
+  } while ((duration_ms(&t1, &t0) <= SSL_HANDSHAKE_TIMEOUT_MILLISECS) &&
+           (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE));
+
+  plog("handshake duration: %d milliseconds", duration_ms(&t1, &t0));
+  if (duration_ms(&t1, &t0) > SSL_HANDSHAKE_TIMEOUT_MILLISECS) {
+    plog("ERROR: long time to perform handshake: %d milliseconds", duration_ms(&t1, &t0));
+    ret = MBEDTLS_ERR_SSL_TIMEOUT;
+    goto exit;
+  }
 
   if (ret != 0) {
     plog("ERROR: failed! mbedtls_ssl_handshake returned -0x%x", -ret);
