@@ -45,15 +45,60 @@ static void reverse_in_place(char *buf, int len) {
   }
 }
 
+typedef struct session_context {
+  int fd;
+  struct sockaddr_in peer_addr;
+  int client_port;
+  char client_ip_str[100];
+  char buf[10000];
+  ssize_t recv_len;
+  ev_timer send_response_timer;
+} session_context;
+
+static void send_response_callback(EV_P_ ev_timer *w, int revents) {
+  struct session_context* session;
+  ssize_t sent_len;
+
+  (void)loop;
+  assert(revents & EV_TIMER);
+  session = w->data;
+
+  reverse_in_place(session->buf, session->recv_len);
+  sent_len = sendto(session->fd, session->buf, session->recv_len, 0, (struct sockaddr *)&session->peer_addr, sizeof(session->peer_addr));
+  if (sent_len < 0) {
+    plog("ERROR in sendto() - returned %d", sent_len);
+  } else if (sent_len != session->recv_len) {
+    plog("ERROR in sendto() - sent only %d out of %d bytes", sent_len, session->recv_len);
+  } else {
+    plog("Sent to   %s:%d - '%s'", session->client_ip_str, session->client_port, session->buf);
+  }
+
+  free(session);
+  w->data = NULL;
+}
+
+static ev_tstamp get_delay_ms_from_buffer(const char* buf) {
+    long delay_ms;
+
+    if (strncmp("delay=", buf, 6) != 0) {
+        return 0.0;
+    }
+    delay_ms = atol(buf + 6);
+    if (delay_ms < 0) {
+        return 0.0;
+    }
+    return (ev_tstamp)delay_ms / 1000.0;
+}
+
 static void handle_udp_packet(EV_P_ ev_io *w, int revents) {
   char buf[10000];
   struct sockaddr_in peer_addr;
   socklen_t peer_addr_len = sizeof(peer_addr);
-  ssize_t recv_len, sent_len;
+  ssize_t recv_len;
   int client_port;
   char client_ip_str[100];
-
-  (void)loop;                   /* unused */
+  session_context* session;
+  ev_tstamp response_delay;
 
   assert(revents & EV_READ);
   recv_len =
@@ -68,15 +113,19 @@ static void handle_udp_packet(EV_P_ ev_io *w, int revents) {
   inet_ntop(AF_INET, &peer_addr.sin_addr, client_ip_str, sizeof(client_ip_str));
   plog("Recv from %s:%d - '%s'", client_ip_str, client_port, buf);
 
-  reverse_in_place(buf, recv_len);
-  sent_len = sendto(w->fd, buf, recv_len, 0, (struct sockaddr *)&peer_addr, peer_addr_len);
-  if (sent_len < 0) {
-    plog("ERROR in sendto() - returned %d", sent_len);
-  } else if (sent_len != recv_len) {
-    plog("ERROR in sendto() - sent only %d out of %d bytes", sent_len, recv_len);
-  } else {
-    plog("Sent to   %s:%d - '%s'", client_ip_str, client_port, buf);
-  }
+  session = malloc(sizeof(session_context));
+  session->fd = w->fd;
+  memcpy(&session->peer_addr, &peer_addr, sizeof(session->peer_addr));
+  session->client_port = client_port;
+  strncpy(session->client_ip_str, client_ip_str, sizeof(session->client_ip_str));
+  memcpy(session->buf, buf, recv_len + 1);
+  session->recv_len = recv_len;
+
+  response_delay = get_delay_ms_from_buffer(buf);
+
+  ev_timer_init(&session->send_response_timer, send_response_callback, response_delay, 0.0);
+  session->send_response_timer.data = session;
+  ev_timer_start(loop, &session->send_response_timer);
 }
 
 static void print_usage(const char *argv0) {
