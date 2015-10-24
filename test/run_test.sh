@@ -126,7 +126,7 @@ run_concurrent_client_scenarios() {
   log_goldy_mem_usage
   starttime=$(now_ms)
   pids=""
-  for i in {1..$duplicates} ; do
+  for i in `seq 1 $duplicates` ; do
     for scenario in $clients_scenarios ; do
       if [ $keep_test_stderr == 1 ]; then
         test/dtls_test_client -n goldy.local -h $GOLDYHOST -p $GOLDYPORT -s "$scenario" &
