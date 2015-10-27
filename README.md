@@ -40,15 +40,16 @@ full-cycle test suite:
 
 ## License
 
-Copyright TODO
+Goldy is distributed under the [Apache License, version 2.0](LICENSE) .
 
-See the LICENSE file.
+(c) Copyright IBM Corp. 2010, 2015
 
+Authors: Dov Murik, Shmulik Regev
+
+Contributions are gladly welcome. Please see the requirement for [Developer Certificate of Origin](CONTRIBUTING.md) .
 
 ## Dependencies & 3rd Party
 
-### mbedtls
+[mbedTLS](https://tls.mbed.org/) is used as the underlying DTLS implementation.
 
-### libev
-
-Code from https://github.com/errordeveloper/contrib-libev-examples was used
+[libev](http://software.schmorp.de/pkg/libev.html) is used as an event library
