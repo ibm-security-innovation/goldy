@@ -55,7 +55,7 @@ typedef struct {
   ev_timer send_response_timer;
 } session_context;
 
-static void send_response_callback(EV_P_ ev_timer * w, int revents) {
+static void send_response_callback(EV_P_ ev_timer *w, int revents) {
   session_context *session;
   ssize_t sent_len;
 
@@ -77,6 +77,10 @@ static void send_response_callback(EV_P_ ev_timer * w, int revents) {
   ev_timer_stop(loop, w);
   free(session);
   /* Must not use 'w' here because it points to the freed memory */
+}
+
+static int is_buffer_noreply(const char *buf) {
+  return (strncmp("noreply", buf, 7) == 0);
 }
 
 static ev_tstamp get_delay_ms_from_buffer(const char *buf) {
@@ -114,6 +118,12 @@ static void handle_udp_packet(EV_P_ ev_io *w, int revents) {
   client_port = ntohs(peer_addr.sin_port);
   inet_ntop(AF_INET, &peer_addr.sin_addr, client_ip_str, sizeof(client_ip_str));
   plog("Recv from %s:%d - '%s'", client_ip_str, client_port, buf);
+
+  if (is_buffer_noreply(buf)) {
+    /* The client's packet started with "noreply", so we're not preparing a
+     * session and scheduling a response. */
+    return;
+  }
 
   session = calloc(1, sizeof(session_context));
   session->fd = w->fd;
