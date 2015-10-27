@@ -31,7 +31,8 @@ QUIET_LINK = @echo "  LINK  $@" 1>&2;
 endif
 
 INDENT_SETTINGS = -br -brf -brs -ce -cli2 -di1 -i2 -l100 -nbad -ncs -npcs -nprs \
-		  -npsl -nut -T session_context -T global_context -T ev_io -T ev_timer
+		  -npsl -nut -T session_context -T global_context -T ev_io -T ev_timer \
+		  -T mbedtls_ssl_context
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 	INDENT = gnuindent $(INDENT_SETTINGS)

@@ -109,6 +109,12 @@ static int send_one_packet(const char *packet_body, mbedtls_ssl_context *ssl) {
   len = ret;
   plog("%d bytes written: '%s'", len, packet_body);
 
+  if (strncmp("noreply", packet_body, 7) == 0) {
+    /* Outgoing packet begins with "noreply", so don't attempt to read a
+     * response from the server. Just return successfully. */
+    return 0;
+  }
+
   plog("Read from server...");
 
   len = sizeof(buf) - 1;
@@ -181,9 +187,8 @@ int run_scenario(const char *scenario, mbedtls_ssl_context *ssl) {
       }
       if (strncmp("sleep=", packet, 6) == 0) {
         long sleepms = atol(packet + 6);
-        struct timespec t = { tv_sec: (sleepms / 1000), tv_nsec:(sleepms % 1000) * 1000000 };
         plog("Scenario: sleeping %ld milliseconds", sleepms);
-        nanosleep(&t, NULL);
+        mbedtls_net_usleep(sleepms * 1000);
       } else {
         ret = send_one_packet(packet, ssl);
         if (ret != 0) {
