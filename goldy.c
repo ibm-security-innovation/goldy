@@ -338,8 +338,7 @@ typedef struct {
   int client_port;
   size_t cliip_len;
   unsigned char buf[4096];
-  size_t read; /* how much was read from the buf */
-  size_t written; /* how much was written to the buf */
+  size_t len;
   ev_io session_watcher;
   ev_io backend_watcher;
   session_step step;
@@ -474,8 +473,8 @@ typedef enum {
 } cb_next_action;
 
 static cb_next_action session_destruct_after_error(EV_P_ ev_io *w,
-                                                      session_context *sc, int ret,
-                                                      const char *label) {
+                                                   session_context *sc, int ret,
+                                                   const char *label) {
   session_report_error(ret, sc, label);
   session_destruct(EV_A_ w, sc, label);
   return done;
@@ -492,7 +491,7 @@ static void session_reset(EV_P_ ev_io *w, session_context *sc) {
 }
 
 static cb_next_action session_step_handshake(EV_P_ ev_io *w, int revents,
-                                                session_context *sc) {
+                                             session_context *sc) {
   int ret = mbedtls_ssl_handshake(&sc->ssl);
 
   (void)revents;
@@ -524,7 +523,7 @@ static cb_next_action session_step_handshake(EV_P_ ev_io *w, int revents,
 }
 
 static cb_next_action session_step_read(EV_P_ ev_io *w, int revents,
-                                           session_context *sc) {
+                                        session_context *sc) {
   int ret;
   int len;
 
@@ -554,8 +553,7 @@ static cb_next_action session_step_read(EV_P_ ev_io *w, int revents,
       return session_destruct_after_error(EV_A_ w, sc, ret,
                                           "session_cb - unknwon error");
     }
-    sc->written = ret;
-    sc->read = 0;
+    sc->len = ret;
     log_debug("(%s:%d) %d bytes read from DTLS socket",
               sc->client_ip_str, sc->client_port, ret);
     ret = mbedtls_net_connect(&sc->backend_fd,
@@ -581,15 +579,13 @@ static cb_next_action session_step_read(EV_P_ ev_io *w, int revents,
 }
 
 static cb_next_action session_step_send_backend(EV_P_ ev_io *w, int revents,
-                                                   session_context *sc) {
+                                                session_context *sc) {
   int ret;
-  int len;
   if ( !(revents & EV_WRITE) ) {
     return done;
   }
 
-  len = sc->written - sc->read;
-  ret = mbedtls_net_send(&sc->backend_fd, sc->buf+sc->read, len);
+  ret = mbedtls_net_send(&sc->backend_fd, sc->buf, sc->len);
 
   if (ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
     sc->last_activity = ev_now(EV_A);
@@ -602,18 +598,14 @@ static cb_next_action session_step_send_backend(EV_P_ ev_io *w, int revents,
   log_debug("(%s:%d) %d bytes sent to backend server",
             sc->client_ip_str, sc->client_port, ret);
   sc->last_activity = ev_now(EV_A);
-  sc->read += len;
   /* if all was sent we're switching to the next step (receive) but otherwise we need to send more */
-  if ( sc->read==sc->written ) {
-    sc->step = GOLDY_SESSION_STEP_RECEIVE_BACKEND;
-    sc->read = 0;
-    sc->written = 0;
-  }
+  sc->step = GOLDY_SESSION_STEP_RECEIVE_BACKEND;
+  sc->len = 0;
   return invoke_now;
 }
 
 static cb_next_action session_step_receive_backend(EV_P_ ev_io *w, int revents,
-                                                      session_context *sc) {
+                                                   session_context *sc) {
   int ret;
   int len;
   if ( !(revents & EV_READ) ) {
@@ -621,7 +613,7 @@ static cb_next_action session_step_receive_backend(EV_P_ ev_io *w, int revents,
   }
 
   len = sizeof(sc->buf) - 1;
-  memset(sc->buf+sc->written, 0, len + 1);
+  memset(sc->buf, 0, len + 1);
   ret = mbedtls_net_recv(&sc->backend_fd, sc->buf, len);
   if (ret == MBEDTLS_ERR_SSL_WANT_READ) {
     sc->last_activity = ev_now(EV_A);
@@ -633,7 +625,7 @@ static cb_next_action session_step_receive_backend(EV_P_ ev_io *w, int revents,
   }
   log_debug("(%s:%d) %d bytes received from backend server",
             sc->client_ip_str, sc->client_port, ret);
-  sc->written = ret;
+  sc->len = ret;
   sc->last_activity = ev_now(EV_A);
   sc->step = GOLDY_SESSION_STEP_WRITE;
   return invoke_now;
@@ -641,9 +633,8 @@ static cb_next_action session_step_receive_backend(EV_P_ ev_io *w, int revents,
 
 
 static cb_next_action session_step_write(EV_P_ ev_io *w, int revents,
-                                            session_context *sc) {
-  int len = sc->written - sc->read;
-  int ret = mbedtls_ssl_write(&sc->ssl, sc->buf, len);
+                                         session_context *sc) {
+  int ret = mbedtls_ssl_write(&sc->ssl, sc->buf, sc->len);
 
   (void)revents;
 
@@ -662,12 +653,7 @@ static cb_next_action session_step_write(EV_P_ ev_io *w, int revents,
     log_debug("(%s:%d) %d bytes written to DTLS socket",
               sc->client_ip_str, sc->client_port, ret);
     sc->last_activity = ev_now(EV_A);
-    sc->read += ret;
 
-    if ( sc->read<sc->written ) {
-      /* more to write */
-      return invoke_now;
-    }
     sc->step = GOLDY_SESSION_STEP_READ;
     mbedtls_net_free(&sc->backend_fd);
     ev_io_stop(EV_A_ & sc->backend_watcher);
@@ -677,7 +663,7 @@ static cb_next_action session_step_write(EV_P_ ev_io *w, int revents,
 }
 
 static cb_next_action session_step_close_notify(EV_P_ ev_io *w, int revents,
-                                                   session_context *sc) {
+                                                session_context *sc) {
   int ret = mbedtls_ssl_close_notify(&sc->ssl);
 
   (void)revents;
@@ -690,7 +676,7 @@ static cb_next_action session_step_close_notify(EV_P_ ev_io *w, int revents,
 }
 
 typedef cb_next_action (*session_step_cb) (EV_P_ ev_io *w, int revents,
-                                              session_context *sc);
+                                           session_context *sc);
 
 static session_step_cb session_callbacks[GOLDY_SESSION_STEP_LAST] = {
   session_step_handshake,
