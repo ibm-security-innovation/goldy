@@ -1,0 +1,4 @@
+DESCRIPTION="3 parallel client with 4 distinct small packets"
+CLIENT_01="ABCDEF,sleep=100,GHIJKL,sleep=200,MNOPQRS,sleep=100,TUVWXYZ"
+CLIENT_02="123456,sleep=100,7890AB,sleep=100,CDEFGHI,sleep=150,JKLMNOP"
+CLINET_03="ZYXWVU,sleep=50,TSRQPO,sleep=200,NMLKJIH,sleep=150,GFEDCBA"
