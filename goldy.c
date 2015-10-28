@@ -223,7 +223,9 @@ static void log_mbedtls_debug_callback(void *ctx, int level, const char *file, i
 
 static int global_init(const struct instance *gi, global_context *gc) {
   int ret;
+#ifdef __APPLE__   // MacOS/X requires an additional call
   int one = 1;
+#endif
   const char *pers = "goldy";
 
   memset(gc, 0, sizeof(*gc));
@@ -330,7 +332,6 @@ typedef enum {
   GOLDY_SESSION_STEP_HANDSHAKE = 0,
   GOLDY_SESSION_STEP_OPERATIONAL,
   GOLDY_SESSION_STEP_CLOSE_NOTIFY,
-  GOLDY_SESSION_STEP_PENDING_DESTRUCTION,
   GOLDY_SESSION_STEP_LAST,
 } session_step;
 
@@ -352,6 +353,7 @@ typedef struct {
   ev_io backend_watcher;
   session_step step;
   ev_tstamp last_activity;
+  int pending_free;
 } session_context;
 
 static void session_dispatch(EV_P_ ev_io *w, int revents);
@@ -474,9 +476,10 @@ static void session_free(EV_P_ session_context *sc) {
 }
 static void session_deferred_free(EV_P_ ev_io *w,
                              session_context *sc, const char *reason) {
+  (void)loop;
+  (void)w;
   log_debug("session_deferred_free - %s %x %d", reason, sc, sc->client_fd.fd);
-  sc->step = GOLDY_SESSION_STEP_PENDING_DESTRUCTION;
-  ev_feed_event(loop,w, EV_CUSTOM);
+  sc->pending_free = 1;
 }
 
 
@@ -700,26 +703,22 @@ static void session_step_close_notify(EV_P_ ev_io *w, int revents,
   return;
 }
 
-static void session_step_pending_destruction(EV_P_ ev_io *w, int revents,
-                                             session_context *sc) {
-  (void)EV_A;
-  (void)w;
-  (void)revents;
-  (void)sc;
-}
-
 typedef void (*session_step_cb) (EV_P_ ev_io *w, int revents,
                                            session_context *sc);
 
 static session_step_cb session_callbacks[GOLDY_SESSION_STEP_LAST] = {
   session_step_handshake,
   session_step_operational,
-  session_step_close_notify,
-  session_step_pending_destruction
+  session_step_close_notify
 };
 
 static void session_check_timeout(EV_P_ ev_io *w, session_context *sc) {
   ev_tstamp now = ev_now(EV_A);
+
+  if (sc->pending_free) {
+    /* Session is already pending destruction, no need to check for timeout */
+    return;
+  }
 
   if (now - sc->last_activity > sc->options->session_timeout) {
     log_debug
@@ -745,14 +744,11 @@ static void session_dispatch(EV_P_ ev_io *w, int revents) {
   count++;
   */
   session_callbacks[sc->step] (EV_A_ w, revents, sc);
-  if (w->data) {
-    session_check_timeout(EV_A_ w, sc);
-  }
-  if ( revents & EV_CUSTOM ) {
+  session_check_timeout(EV_A_ w, sc);
+  if (sc->pending_free) {
     /* time to kill the session */
     session_free(EV_A_ sc);
   }
-
 }
 
 static void start_listen_io(EV_P_ ev_io *w, global_context *gc) {
