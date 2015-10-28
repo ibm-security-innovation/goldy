@@ -1,0 +1,2 @@
+DESCRIPTION="Big packet"
+CLIENT_01="A$(printf '%1200s' | tr ' ' '_')Z"

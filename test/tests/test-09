@@ -1,0 +1,3 @@
+DESCRIPTION="50 identical parallel clients with 4 small packets each"
+DUPLICATES=50
+CLIENT_01="ABCDEF,sleep=50,serverdelay=200_GHIJKL,sleep=50,MNOPQRS,sleep=50,serverdelay=200_TUVWXYZ"

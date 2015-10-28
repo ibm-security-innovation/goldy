@@ -1,0 +1,4 @@
+DESCRIPTION="4 small clients and 4 big clients (all in parallel)"
+DUPLICATES=4
+CLIENT_01="repeat=5,ABCDEF,sleep=50,serverdelay=200_GHIJKL,sleep=50,MNOPQRS,sleep=50,serverdelay=200_TUVWXYZ"
+CLIENT_02="repeat=8,A$(printf '%1200s' | tr ' ' '_')Z,sleep=100,serverdelay=200,A$(printf '%1200s' | tr ' ' '_')Z"

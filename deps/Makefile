@@ -1,3 +1,7 @@
+ifdef DEBUG
+LIBEV_CFLAGS=-g3
+endif
+
 download_deps: download_mbedtls download_libev
 
 .PHONY: download_deps
@@ -26,7 +30,7 @@ download_libev:
 .PHONY: download_libev
 
 build_libev:
-	cd libev-$(LIBEV_VER); ./configure; $(MAKE)
+	cd libev-$(LIBEV_VER) && CFLAGS=$(LIBEV_CFLAGS) ./configure && $(MAKE)
 
 .PHONY: build_libev
 

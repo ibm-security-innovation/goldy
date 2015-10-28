@@ -1,0 +1,2 @@
+DESCRIPTION="5000 small sequential packets"
+CLIENT_01="repeat=5000,ABCDEF"

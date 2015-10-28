@@ -1,0 +1,2 @@
+DESCRIPTION="4 small sequential packets"
+CLIENT_01="ABCDEF,sleep=100,GHIJKL,sleep=200,MNOPQRS,sleep=100,TUVWXYZ"
