@@ -1,0 +1,2 @@
+DESCRIPTION="5 small sequential packets but 2 without server response"
+CLIENT_01="ABCDEF,sleep=100,noreply_GHIJKL,sleep=200,MNOPQRS,sleep=100,noreply_TUVWXYZ,sleep=50,ABABABAB"
