@@ -487,16 +487,6 @@ static void session_deferred_free_after_error(EV_P_ ev_io *w,
   session_deferred_free(EV_A_ w, sc, label);
 }
 
-static void session_reset(EV_P_ ev_io *w, session_context *sc) {
-  (void)EV_A;
-  (void)w;
-  log_debug("(%s:%d) session_reset %x", sc->client_ip_str,
-            sc->client_port, sc);
-  mbedtls_net_free(&sc->client_fd);
-  mbedtls_ssl_session_reset(&sc->ssl);
-  ev_io_stop(EV_A_ & sc->session_watcher);
-}
-
 static int connect_to_backend(EV_P_ session_context *sc) {
   int ret;
   ret = mbedtls_net_connect(&sc->backend_fd,
@@ -542,7 +532,7 @@ static void session_step_handshake(EV_P_ ev_io *w, int revents,
   case MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED:
     log_debug("(%s:%d) DTLS handshake requested hello verification",
               sc->client_ip_str, sc->client_port);
-    session_reset(EV_A_ w,sc);
+    session_deferred_free(EV_A_ w,sc,"hello verification");
     return;
 
   default:
