@@ -330,6 +330,7 @@ typedef enum {
   GOLDY_SESSION_STEP_HANDSHAKE = 0,
   GOLDY_SESSION_STEP_OPERATIONAL,
   GOLDY_SESSION_STEP_CLOSE_NOTIFY,
+  GOLDY_SESSION_STEP_PENDING_DESTRUCTION,
   GOLDY_SESSION_STEP_LAST,
 } session_step;
 
@@ -460,9 +461,8 @@ static int session_connected(session_context *sc) {
   return ret == 0 ? 0 : 1;
 }
 
-static void session_destruct(EV_P_ ev_io *w,
-                             session_context *sc, const char *reason) {
-  log_debug("session_destruct - %s %x %d", reason, sc, sc->client_fd.fd);
+static void session_free(EV_P_ session_context *sc) {
+  log_debug("session_free - %x", sc);
   ev_io_stop(EV_A_ & sc->backend_watcher);
   ev_io_stop(EV_A_ & sc->session_watcher);
 
@@ -471,15 +471,20 @@ static void session_destruct(EV_P_ ev_io *w,
   mbedtls_ssl_free(&sc->ssl);
 
   free(sc);
-  w->data = NULL;
+}
+static void session_deferred_free(EV_P_ ev_io *w,
+                             session_context *sc, const char *reason) {
+  log_debug("session_deferred_free - %s %x %d", reason, sc, sc->client_fd.fd);
+  sc->step = GOLDY_SESSION_STEP_PENDING_DESTRUCTION;
+  ev_feed_event(loop,w, EV_CUSTOM);
 }
 
 
-static void session_destruct_after_error(EV_P_ ev_io *w,
+static void session_deferred_free_after_error(EV_P_ ev_io *w,
                                                    session_context *sc, int ret,
                                                    const char *label) {
   session_report_error(ret, sc, label);
-  session_destruct(EV_A_ w, sc, label);
+  session_deferred_free(EV_A_ w, sc, label);
 }
 
 static void session_reset(EV_P_ ev_io *w, session_context *sc) {
@@ -528,7 +533,7 @@ static void session_step_handshake(EV_P_ ev_io *w, int revents,
               sc->client_port);
     sc->last_activity = ev_now(EV_A);
     if ( connect_to_backend(EV_A_ sc)!=0 ) {
-      return session_destruct_after_error(EV_A_ w, sc, ret,
+      return session_deferred_free_after_error(EV_A_ w, sc, ret,
                                           "session_step_send_backend");
     }
     sc->step = GOLDY_SESSION_STEP_OPERATIONAL;
@@ -541,7 +546,7 @@ static void session_step_handshake(EV_P_ ev_io *w, int revents,
     return;
 
   default:
-    return session_destruct_after_error(EV_A_ w, sc, ret,
+    return session_deferred_free_after_error(EV_A_ w, sc, ret,
                                         "session_cb - ssl handshake");
   }
 }
@@ -571,7 +576,7 @@ static void session_receive_from_client(EV_P_ ev_io *w,session_context *sc) {
 
   default:
     if (ret < 0) {
-      session_destruct_after_error(EV_A_ w, sc, ret,
+      session_deferred_free_after_error(EV_A_ w, sc, ret,
                                    "session_receive_from_client - unknwon error");
       return;
     }
@@ -603,7 +608,7 @@ static void session_send_to_backend(EV_P_ ev_io *w, session_context *sc) {
     return;
   }
   if (ret < 0) {
-    session_destruct_after_error(EV_A_ w, sc, ret,
+    session_deferred_free_after_error(EV_A_ w, sc, ret,
                                  "session_send_to_backend");
     return;
   }
@@ -627,7 +632,7 @@ static void session_receive_from_backend(EV_P_ ev_io *w, session_context *sc) {
     return;
   }
   if (ret < 0) {
-    session_destruct_after_error(EV_A_ w, sc, ret,
+    session_deferred_free_after_error(EV_A_ w, sc, ret,
                                  "session_receive_from_backend");
     return;
   }
@@ -662,7 +667,7 @@ static void session_send_to_client(EV_P_ ev_io *w,session_context *sc) {
 
   default:
     if (ret < 0) {
-      session_destruct_after_error(EV_A_ w, sc, ret,
+      session_deferred_free_after_error(EV_A_ w, sc, ret,
                                    "session_send_to_client - write error");
       return;
     }
@@ -678,11 +683,18 @@ static void session_send_to_client(EV_P_ ev_io *w,session_context *sc) {
 }
 
 static void session_step_operational(EV_P_ ev_io *w, int revents,session_context *sc) {
-  (void)revents;
-  session_receive_from_client(EV_A_ w,sc);
-  session_send_to_backend(EV_A_ w,sc);
-  session_receive_from_backend(EV_A_ w,sc);
-  session_send_to_client(EV_A_ w,sc);
+  if ((w->fd == sc->client_fd.fd) && (revents & EV_READ)) {
+    session_receive_from_client(EV_A_ w,sc);
+  }
+  if ((w->fd == sc->backend_fd.fd) && (revents & EV_WRITE)) {
+    session_send_to_backend(EV_A_ w,sc);
+  }
+  if ((w->fd == sc->backend_fd.fd) && (revents & EV_READ)) {
+    session_receive_from_backend(EV_A_ w,sc);
+  }
+  if ((w->fd == sc->client_fd.fd) && (revents & EV_WRITE)) {
+    session_send_to_client(EV_A_ w,sc);
+  }
 }
 
 static void session_step_close_notify(EV_P_ ev_io *w, int revents,
@@ -694,8 +706,16 @@ static void session_step_close_notify(EV_P_ ev_io *w, int revents,
   if (ret==MBEDTLS_ERR_SSL_WANT_WRITE || ret==MBEDTLS_ERR_SSL_WANT_READ) {
     return;
   }
-  session_destruct(EV_A_ w, sc, "close_notify");
+  session_deferred_free(EV_A_ w, sc, "close_notify");
   return;
+}
+
+static void session_step_pending_destruction(EV_P_ ev_io *w, int revents,
+                                             session_context *sc) {
+  (void)EV_A;
+  (void)w;
+  (void)revents;
+  (void)sc;
 }
 
 typedef void (*session_step_cb) (EV_P_ ev_io *w, int revents,
@@ -704,7 +724,8 @@ typedef void (*session_step_cb) (EV_P_ ev_io *w, int revents,
 static session_step_cb session_callbacks[GOLDY_SESSION_STEP_LAST] = {
   session_step_handshake,
   session_step_operational,
-  session_step_close_notify
+  session_step_close_notify,
+  session_step_pending_destruction
 };
 
 static void session_check_timeout(EV_P_ ev_io *w, session_context *sc) {
@@ -715,15 +736,15 @@ static void session_check_timeout(EV_P_ ev_io *w, session_context *sc) {
       ("session_check_timeout - timeout: now=%f - last_activity=%f (duration=%f) > timeout=%d",
        now, sc->last_activity, now - sc->last_activity,
        sc->options->session_timeout);
-    session_destruct(EV_A_ w, sc, "session timed out");
+    session_deferred_free(EV_A_ w, sc, "session timed out");
   }
 }
 
 static void session_dispatch(EV_P_ ev_io *w, int revents) {
   session_context *sc = (session_context *)w->data;
+  /*
   static int count = 0;
 
-  /*
   log_debug("(%s:%d) session_dispatch fds: %d,%d; w: %d; revents:0x%02x; step:%d",
             sc->client_ip_str, sc->client_port,
             sc->client_fd.fd,
@@ -731,12 +752,17 @@ static void session_dispatch(EV_P_ ev_io *w, int revents) {
             w->fd,
             revents,
             sc->step);
-  */
   count++;
+  */
   session_callbacks[sc->step] (EV_A_ w, revents, sc);
   if (w->data) {
     session_check_timeout(EV_A_ w, sc);
   }
+  if ( revents & EV_CUSTOM ) {
+    /* time to kill the session */
+    session_free(EV_A_ sc);
+  }
+
 }
 
 static void start_listen_io(EV_P_ ev_io *w, global_context *gc) {
