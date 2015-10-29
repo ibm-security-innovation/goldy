@@ -130,8 +130,23 @@ log_goldy_mem_usage() {
   log "goldy (PID $goldypid) resource usage: Memory RSS=${m[0]} KB, Memory VSZ=${m[1]} KB, $udp_stats"
 }
 
+has_gdate() {
+  if [[ `uname` == "Darwin" ]] ; then
+    which gdate > /dev/null
+    if [[ $? == 0 ]]; then
+      return 1
+    fi
+  fi
+  return 0
+}
+
 now_ms() {
-  date +'%s-%N' | sed -e 's/^\([0-9]*\)-\([0-9][0-9][0-9]\).*$/\1\2/'
+  # OSX doesn't have date with millisecs precision so we'll search for gdate and opt for it if it is there
+  date_binary="date"
+  if [[ has_gdate != 0 ]] ; then
+    date_binary=gdate
+  fi
+  $date_binary +'%s-%N' | sed -e 's/^\([0-9]*\)-\([0-9][0-9][0-9]\).*$/\1\2/'
 }
 
 run_test_file() {
@@ -180,9 +195,10 @@ run_test_file() {
   done
 
   endtime=$(now_ms)
+  [[ `uname` != "Darwin" ||  has_gdate == 0 ]] && time_resolution="secs" || time_resolution="millisecs"
   log_goldy_mem_usage
   log "=============================================== results"
-  log "$testnum took $((endtime - starttime)) milliseconds"
+  log "$testnum took $((endtime - starttime)) $time_resolution"
   if [ $exitcode != 0 ] ; then
     echo "not ok $testnum - $DESCRIPTION"
     return 1
