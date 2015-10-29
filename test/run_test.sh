@@ -17,6 +17,7 @@ OPTIONS:
    -k      kill processes using pkill
    -s      skip log (keep stderr)
    -t      skip test client/server log (keep test client/server stderr)
+   -n      run specific test - N
    -v      run goldy under valgrind
 EOF
 
@@ -27,8 +28,9 @@ pkill_processes=0
 keep_stderr=0
 keep_test_stderr=0
 use_valgrind=0
+test_num=0
 
-while getopts "klstv" OPTION
+while getopts "klstvn:" OPTION
 do
   case $OPTION in
     l)
@@ -50,6 +52,10 @@ do
     v)
       use_valgrind=1
       echo "Will run goldy under valgrind"
+      ;;
+    n)
+      test_num=$OPTARG
+      echo "running only test $test_num"
       ;;
     h)
       usage
@@ -213,10 +219,15 @@ log "Waiting for goldy and backend server to start..."
 sleep 1
 
 failures=0
-for f in test/tests/test-* ; do
-  run_test_file $f
+if [[ $test_num == 0 ]] ; then
+  for f in test/tests/test-* ; do
+    run_test_file $f
+    failures=$((failures+$?))
+  done
+else
+  run_test_file `printf "test/tests/test-%02d" $test_num`
   failures=$((failures+$?))
-done
+fi
 
 cleanup
 
