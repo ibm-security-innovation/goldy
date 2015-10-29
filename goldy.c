@@ -283,7 +283,6 @@ static int global_init(const struct instance *gi, global_context *gc) {
 
   mbedtls_ssl_conf_dbg(&gc->conf, log_mbedtls_debug_callback, NULL);
   mbedtls_debug_set_threshold(MBEDTLS_DEBUG_LOGGING_LEVEL);
-  mbedtls_ssl_conf_read_timeout(&gc->conf,1);
   mbedtls_ssl_conf_rng(&gc->conf, mbedtls_ctr_drbg_random, &gc->ctr_drbg);
 
 #if defined(MBEDTLS_SSL_CACHE_C)
@@ -454,7 +453,7 @@ static int session_connected(session_context *sc) {
                                                  sc->client_ip,
                                                  sc->cliip_len)) == 0) {
     mbedtls_ssl_set_bio(&sc->ssl, &sc->client_fd, mbedtls_net_send,
-                        mbedtls_net_recv, mbedtls_net_recv_timeout);
+                        mbedtls_net_recv, 0);
   } else {
     session_report_error(ret, sc, "session_connected");
   }
