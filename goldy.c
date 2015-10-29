@@ -547,8 +547,6 @@ static void session_receive_from_client(EV_P_ ev_io *w,session_context *sc) {
   packet_data *pd;
   packet_data temp;
 
-  temp.length = sizeof(temp.payload)-1;
-  memset(temp.payload,0,temp.length);
   ret = mbedtls_ssl_read(&sc->ssl,temp.payload,temp.length);
   switch (ret) {
   case MBEDTLS_ERR_SSL_WANT_READ:
