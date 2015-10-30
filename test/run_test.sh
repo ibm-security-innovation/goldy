@@ -130,22 +130,7 @@ log_goldy_mem_usage() {
   log "goldy (PID $goldypid) resource usage: Memory RSS=${m[0]} KB, Memory VSZ=${m[1]} KB, $udp_stats"
 }
 
-has_gdate() {
-  if [[ `uname` == "Darwin" ]] ; then
-    which gdate > /dev/null
-    if [[ $? == 0 ]]; then
-      return 1
-    fi
-  fi
-  return 0
-}
-
 now_ms() {
-  # OSX doesn't have date with millisecs precision so we'll search for gdate and opt for it if it is there
-  date_binary="date"
-  if [[ has_gdate != 0 ]] ; then
-    date_binary=gdate
-  fi
   $date_binary +'%s-%N' | sed -e 's/^\([0-9]*\)-\([0-9][0-9][0-9]\).*$/\1\2/'
 }
 
@@ -195,7 +180,6 @@ run_test_file() {
   done
 
   endtime=$(now_ms)
-  [[ `uname` != "Darwin" ||  has_gdate == 0 ]] && time_resolution="secs" || time_resolution="millisecs"
   log_goldy_mem_usage
   log "=============================================== results"
   log "$testnum took $((endtime - starttime)) $time_resolution"
@@ -208,6 +192,20 @@ run_test_file() {
 }
 
 trap handle_signal INT TERM HUP
+
+date_binary=date
+time_resolution=millisecs
+if [[ `uname` == "Darwin" ]] ; then
+  # OSX doesn't have date with millisecs precision so we'll search for gdate
+  # and opt for it if it is there, otherwise settle for date's whole-second resolution
+  which gdate > /dev/null 2>&1
+  if [[ $? == 0 ]]; then
+    log "Using gdate"
+    date_binary=gdate
+  else
+    time_resolution=secs
+  fi
+fi
 
 log "Starting goldy..."
 valgrind_cmd=""
