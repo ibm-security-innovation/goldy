@@ -1,3 +1,5 @@
+include versions.mk
+
 ifdef DEBUG
 LIBEV_CFLAGS=-g3
 endif
@@ -10,7 +12,6 @@ build_deps: build_mbedtls build_libev
 
 .PHONY: build_deps
 
-MBEDTLS_VER=2.2.0
 download_mbedtls:
 	curl -O https://tls.mbed.org/download/mbedtls-$(MBEDTLS_VER)-apache.tgz
 	tar xzf mbedtls-$(MBEDTLS_VER)-apache.tgz
@@ -21,7 +22,6 @@ download_mbedtls:
 build_mbedtls:
 	$(MAKE) -C mbedtls-$(MBEDTLS_VER) lib
 
-LIBEV_VER=4.20
 download_libev:
 	curl -O http://dist.schmorp.de/libev/libev-$(LIBEV_VER).tar.gz
 	tar xzf libev-$(LIBEV_VER).tar.gz

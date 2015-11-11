@@ -1,7 +1,9 @@
-MBEDTLS_INC_DIR ?= deps/mbedtls-2.2.0/include
-MBEDTLS_LIB_DIR ?= deps/mbedtls-2.2.0/library
-LIBEV_INC_DIR ?= deps/libev-4.20
-LIBEV_LIB_DIR ?= deps/libev-4.20
+include deps/versions.mk
+
+MBEDTLS_INC_DIR ?= deps/mbedtls-$(MBEDTLS_VER)/include
+MBEDTLS_LIB_DIR ?= deps/mbedtls-$(MBEDTLS_VER)/library
+LIBEV_INC_DIR ?= deps/libev-$(LIBEV_VER)
+LIBEV_LIB_DIR ?= deps/libev-$(LIBEV_VER)
 
 CFLAGS ?= -g
 WARNING_CFLAGS ?= -Wall -W -Wdeclaration-after-statement
