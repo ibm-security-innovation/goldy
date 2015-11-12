@@ -45,20 +45,32 @@ endif
 APP = goldy
 OBJS = goldy.o daemonize.o log.o
 
+SEND_ONE_DTLS_PACKET = test/send_one_dtls_packet
+SEND_ONE_DTLS_PACKET_OBJS = test/send_one_dtls_packet.o
+
 TEST_CLIENT = test/dtls_test_client
 TEST_CLIENT_OBJS = test/dtls_test_client.o
 
 TEST_SERVER = test/udp_test_server
 TEST_SERVER_OBJS = test/udp_test_server.o
 
+TEST_APPS = $(SEND_ONE_DTLS_PACKET) $(TEST_CLIENT) $(TEST_SERVER)
+TEST_OBJS = $(SEND_ONE_DTLS_PACKET_OBJS) $(TEST_CLIENT_OBJS) $(TEST_SERVER_OBJS)
+
 SRCS_C = $(OBJS:.o=.c) $(TEST_CLIENT_OBJS:.o=.c) $(TEST_SERVER_OBJS:.o=.c)
 SRCS_H = $(OBJS:.o=.h)
+
+GEN_KEY = $(MBEDTLS_INC_DIR)/../programs/pkey/gen_key
+CERT_WRITE = $(MBEDTLS_INC_DIR)/../programs/x509/cert_write
 
 .PHONY: all clean distclean deps test format
 
 all: $(APP)
 
 $(APP): $(OBJS) $(MBEDTLS_LIBS) $(LIBEV_LIBS)
+	$(LINK) -o $@ $^
+
+$(SEND_ONE_DTLS_PACKET): $(SEND_ONE_DTLS_PACKET_OBJS) $(MBEDTLS_LIBS)
 	$(LINK) -o $@ $^
 
 $(TEST_CLIENT): $(TEST_CLIENT_OBJS) $(MBEDTLS_LIBS)
@@ -81,7 +93,7 @@ $(MBEDTLS_CONFIG_INC):
 	@false
 
 clean:
-	rm -f $(APP) $(OBJS) $(TEST_CLIENT) $(TEST_CLIENT_OBJS) $(TEST_SERVER) $(TEST_SERVER_OBJS)
+	rm -f $(APP) $(OBJS) $(TEST_APPS) $(TEST_OBJS)
 
 distclean: clean
 	$(MAKE) -C deps distclean
@@ -89,16 +101,20 @@ distclean: clean
 deps:
 	$(MAKE) -C deps download_deps build_deps
 
-test: $(TEST_CLIENT) $(TEST_SERVER) test/keys/test-proxy-key.pem test/keys/test-proxy-cert.pem
+test: $(TEST_APPS) test/keys/test-proxy-key.pem test/keys/test-proxy-cert.pem
 	test/run_test.sh
 
-test/keys/test-proxy-key.pem:
-	$(MBEDTLS_INC_DIR)/../programs/pkey/gen_key \
-		type=ec ec_curve=secp256r1 format=pem filename=$@
+$(GEN_KEY):
+	$(MAKE) -C $(MBEDTLS_INC_DIR)/../programs pkey/gen_key
 
-test/keys/test-proxy-cert.pem: test/keys/test-proxy-key.pem
-	$(MBEDTLS_INC_DIR)/../programs/x509/cert_write \
-		issuer_name="CN=goldy.local, O=Dummy Ltd, C=US" \
+test/keys/test-proxy-key.pem:
+	$(GEN_KEY) type=ec ec_curve=secp256r1 format=pem filename=$@
+
+$(CERT_WRITE):
+	$(MAKE) -C $(MBEDTLS_INC_DIR)/../programs x509/cert_write
+
+test/keys/test-proxy-cert.pem: $(MBEDTLS_INC_DIR)/../programs/x509/cert_write test/keys/test-proxy-key.pem
+	$(CERT_WRITE) issuer_name="CN=goldy.local, O=Dummy Ltd, C=US" \
 		selfsign=1 issuer_key=$< output_file=$@
 
 format:

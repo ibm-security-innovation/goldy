@@ -2,6 +2,7 @@
 *~
 /goldy
 /test/dtls_test_client
+/test/send_one_dtls_packet
 /test/udp_test_server
 /deps/mbedtls-*
 /deps/libev-*
