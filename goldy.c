@@ -44,6 +44,17 @@
 /* Raise this value to have more verbose logging from mbedtls functions */
 #define MBEDTLS_DEBUG_LOGGING_LEVEL 0
 
+/* Delete all the items in a singly-linked list */
+#define LL_PURGE(head)                 \
+  do {                                 \
+    LDECLTYPE(head) _tmp;              \
+    while (head) {                     \
+      _tmp = (head);                   \
+      (head) = (head)->next;           \
+      free(_tmp);                      \
+    }                                  \
+  } while (0)
+
 static void print_version() {
   printf("goldy %s\n", GOLDY_VERSION);
 }
@@ -330,6 +341,7 @@ typedef struct packet_data {
 typedef enum {
   GOLDY_SESSION_STEP_HANDSHAKE = 0,
   GOLDY_SESSION_STEP_OPERATIONAL,
+  GOLDY_SESSION_STEP_FLUSH_TO_BACKEND,
   GOLDY_SESSION_STEP_CLOSE_NOTIFY,
   GOLDY_SESSION_STEP_LAST,
 } session_step;
@@ -471,6 +483,10 @@ static void session_free(EV_P_ session_context *sc) {
   mbedtls_net_free(&sc->client_fd);
   mbedtls_ssl_free(&sc->ssl);
 
+  LL_PURGE(sc->from_client);
+  LL_PURGE(sc->from_backend);
+
+  log_info("(%s:%d) Session closed", sc->client_ip_str, sc->client_port);
   free(sc);
 }
 static void session_deferred_free(EV_P_ ev_io *w,
@@ -561,7 +577,7 @@ static void session_receive_from_client(EV_P_ ev_io *w,session_context *sc) {
   case MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY:
     log_info("(%s:%d) Client asked to close DTLS session",
              sc->client_ip_str, sc->client_port);
-    sc->step = GOLDY_SESSION_STEP_CLOSE_NOTIFY;
+    sc->step = GOLDY_SESSION_STEP_FLUSH_TO_BACKEND;
     return ev_feed_fd_event(loop, sc->client_fd.fd, EV_READ | EV_WRITE);
 
   default:
@@ -604,6 +620,9 @@ static void session_send_to_backend(EV_P_ ev_io *w, session_context *sc) {
   }
   log_debug("(%s:%d) %d bytes sent to backend server",
             sc->client_ip_str, sc->client_port, ret);
+  if ((size_t)ret != head->length) {
+    log_error("Sent only %d bytes out of %d", ret, head->length);
+  }
   sc->last_activity = ev_now(EV_A);
   LL_DELETE(sc->from_client,head);
   free(head);
@@ -664,12 +683,14 @@ static void session_send_to_client(EV_P_ ev_io *w,session_context *sc) {
     /* ret is the written len */
     log_debug("(%s:%d) %d bytes written to DTLS socket",
               sc->client_ip_str, sc->client_port, ret);
+    if ((size_t)ret != head->length) {
+      log_error("Sent only %d bytes out of %d", ret, head->length);
+    }
     sc->last_activity = ev_now(EV_A);
     LL_DELETE(sc->from_backend,head);
     free(head);
     return ev_feed_fd_event(loop, sc->client_fd.fd, EV_READ | EV_WRITE);
   }
-
 }
 
 static void session_step_operational(EV_P_ ev_io *w, int revents,session_context *sc) {
@@ -687,6 +708,18 @@ static void session_step_operational(EV_P_ ev_io *w, int revents,session_context
   }
 }
 
+static void session_step_flush_to_backend(EV_P_ ev_io *w, int revents,
+                                          session_context *sc) {
+  if (sc->from_client) {
+    if ((w->fd == sc->backend_fd.fd) && (revents & EV_WRITE)) {
+      session_send_to_backend(EV_A_ w,sc);
+    }
+  } else {
+    /* No more packets to send to backend */
+    sc->step = GOLDY_SESSION_STEP_CLOSE_NOTIFY;
+  }
+}
+
 static void session_step_close_notify(EV_P_ ev_io *w, int revents,
                                                 session_context *sc) {
   int ret = mbedtls_ssl_close_notify(&sc->ssl);
@@ -697,7 +730,6 @@ static void session_step_close_notify(EV_P_ ev_io *w, int revents,
     return;
   }
   session_deferred_free(EV_A_ w, sc, "close_notify");
-  return;
 }
 
 typedef void (*session_step_cb) (EV_P_ ev_io *w, int revents,
@@ -706,6 +738,7 @@ typedef void (*session_step_cb) (EV_P_ ev_io *w, int revents,
 static session_step_cb session_callbacks[GOLDY_SESSION_STEP_LAST] = {
   session_step_handshake,
   session_step_operational,
+  session_step_flush_to_backend,
   session_step_close_notify
 };
 
