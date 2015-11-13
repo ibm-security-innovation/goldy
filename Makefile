@@ -1,7 +1,9 @@
 include deps/versions.mk
 
-MBEDTLS_INC_DIR ?= deps/mbedtls-$(MBEDTLS_VER)/include
-MBEDTLS_LIB_DIR ?= deps/mbedtls-$(MBEDTLS_VER)/library
+MBEDTLS_DIR ?= deps/mbedtls-$(MBEDTLS_VER)
+MBEDTLS_INC_DIR ?= $(MBEDTLS_DIR)/include
+MBEDTLS_LIB_DIR ?= $(MBEDTLS_DIR)/library
+MBEDTLS_PROG_DIR ?= $(MBEDTLS_DIR)/programs
 LIBEV_INC_DIR ?= deps/libev-$(LIBEV_VER)
 LIBEV_LIB_DIR ?= deps/libev-$(LIBEV_VER)
 
@@ -60,8 +62,8 @@ TEST_OBJS = $(SEND_ONE_DTLS_PACKET_OBJS) $(TEST_CLIENT_OBJS) $(TEST_SERVER_OBJS)
 SRCS_C = $(OBJS:.o=.c) $(TEST_CLIENT_OBJS:.o=.c) $(TEST_SERVER_OBJS:.o=.c)
 SRCS_H = $(OBJS:.o=.h)
 
-GEN_KEY = $(MBEDTLS_INC_DIR)/../programs/pkey/gen_key
-CERT_WRITE = $(MBEDTLS_INC_DIR)/../programs/x509/cert_write
+GEN_KEY = $(MBEDTLS_PROG_DIR)/pkey/gen_key
+CERT_WRITE = $(MBEDTLS_PROG_DIR)/x509/cert_write
 
 .PHONY: all clean distclean deps test format
 
@@ -105,15 +107,15 @@ test: $(TEST_APPS) test/keys/test-proxy-key.pem test/keys/test-proxy-cert.pem
 	test/run_test.sh
 
 $(GEN_KEY):
-	$(MAKE) -C $(MBEDTLS_INC_DIR)/../programs pkey/gen_key
+	$(MAKE) -C $(MBEDTLS_PROG_DIR) pkey/gen_key
 
-test/keys/test-proxy-key.pem:
+test/keys/test-proxy-key.pem: $(GEN_KEY)
 	$(GEN_KEY) type=ec ec_curve=secp256r1 format=pem filename=$@
 
 $(CERT_WRITE):
-	$(MAKE) -C $(MBEDTLS_INC_DIR)/../programs x509/cert_write
+	$(MAKE) -C $(MBEDTLS_PROG_DIR) x509/cert_write
 
-test/keys/test-proxy-cert.pem: $(MBEDTLS_INC_DIR)/../programs/x509/cert_write test/keys/test-proxy-key.pem
+test/keys/test-proxy-cert.pem: test/keys/test-proxy-key.pem $(CERT_WRITE)
 	$(CERT_WRITE) issuer_name="CN=goldy.local, O=Dummy Ltd, C=US" \
 		selfsign=1 issuer_key=$< output_file=$@
 
