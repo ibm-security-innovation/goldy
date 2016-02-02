@@ -360,8 +360,10 @@ typedef struct {
   size_t cliip_len;
   packet_data *from_client;
   packet_data *from_backend;
-  ev_io session_watcher;
-  ev_io backend_watcher;
+  ev_io client_rd_watcher;
+  ev_io client_wr_watcher;
+  ev_io backend_rd_watcher;
+  ev_io backend_wr_watcher;
   session_step step;
   ev_tstamp last_activity;
   int pending_free;
@@ -410,11 +412,14 @@ static int session_init(const global_context *gc,
 }
 
 static void session_start(session_context *sc, EV_P) {
-  ev_io_init(&sc->session_watcher, session_dispatch,
-             sc->client_fd.fd, EV_READ | EV_WRITE);
-  sc->session_watcher.data = sc;
+  ev_io_init(&sc->client_rd_watcher, session_dispatch,
+             sc->client_fd.fd, EV_READ);
+  ev_io_init(&sc->client_wr_watcher, session_dispatch,
+             sc->client_fd.fd, EV_WRITE);
+  sc->client_rd_watcher.data = sc;
+  sc->client_wr_watcher.data = sc;
   sc->last_activity = ev_now(EV_A);
-  ev_io_start(EV_A_ &sc->session_watcher);
+  ev_io_start(EV_A_ &sc->client_rd_watcher);
 }
 
 static void acquire_peername(session_context *sc) {
@@ -476,8 +481,10 @@ static int session_connected(session_context *sc) {
 
 static void session_free(EV_P_ session_context *sc) {
   log_debug("session_free - %x", sc);
-  ev_io_stop(EV_A_ & sc->backend_watcher);
-  ev_io_stop(EV_A_ & sc->session_watcher);
+  ev_io_stop(EV_A_ & sc->backend_rd_watcher);
+  ev_io_stop(EV_A_ & sc->backend_wr_watcher);
+  ev_io_stop(EV_A_ & sc->client_rd_watcher);
+  ev_io_stop(EV_A_ & sc->client_wr_watcher);
 
   mbedtls_net_free(&sc->backend_fd);
   mbedtls_net_free(&sc->client_fd);
@@ -517,10 +524,13 @@ static int connect_to_backend(EV_P_ session_context *sc) {
   mbedtls_net_set_nonblock(&sc->backend_fd);
   log_info("Created socket to backend UDP %s:%s-%d",
            sc->options->backend_host, sc->options->backend_port,sc->backend_fd.fd);
-  ev_io_init(&sc->backend_watcher, session_dispatch, sc->backend_fd.fd,
-             EV_READ | EV_WRITE);
-  sc->backend_watcher.data = sc;
-  ev_io_start(EV_A_ &sc->backend_watcher);
+  ev_io_init(&sc->backend_rd_watcher, session_dispatch, sc->backend_fd.fd,
+             EV_READ);
+  ev_io_init(&sc->backend_wr_watcher, session_dispatch, sc->backend_fd.fd,
+             EV_WRITE);
+  sc->backend_rd_watcher.data = sc;
+  sc->backend_wr_watcher.data = sc;
+  ev_io_start(EV_A_ &sc->backend_rd_watcher);
   return 0;
 }
 
@@ -595,6 +605,7 @@ static void session_receive_from_client(EV_P_ ev_io *w,session_context *sc) {
     pd->length = ret;
     LL_APPEND(sc->from_client,pd);
     sc->last_activity = ev_now(EV_A);
+    ev_io_start(EV_A_ &sc->backend_wr_watcher);
     return ev_feed_fd_event(loop, sc->client_fd.fd, EV_READ | EV_WRITE);
   }
 }
@@ -604,6 +615,7 @@ static void session_send_to_backend(EV_P_ ev_io *w, session_context *sc) {
   packet_data* head = sc->from_client;
 
   if ( !head ) {
+    ev_io_stop(EV_A_ &sc->backend_wr_watcher);
     return;
   }
 
@@ -653,6 +665,7 @@ static void session_receive_from_backend(EV_P_ ev_io *w, session_context *sc) {
   pd->length = ret;
   LL_APPEND(sc->from_backend,pd);
   sc->last_activity = ev_now(EV_A);
+  ev_io_start(EV_A_ &sc->client_wr_watcher);
   log_debug("session_receive_from_backend - 2");
   return ev_feed_fd_event(loop, sc->backend_fd.fd, EV_READ | EV_WRITE);
 }
@@ -663,6 +676,7 @@ static void session_send_to_client(EV_P_ ev_io *w,session_context *sc) {
   packet_data* head = sc->from_backend;
 
   if ( !head ) {
+    ev_io_stop(EV_A_ &sc->client_wr_watcher);
     return;
   }
 
