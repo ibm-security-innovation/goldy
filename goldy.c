@@ -589,7 +589,7 @@ static void session_step_handshake(EV_P_ ev_io *w, int revents,
 static void session_receive_from_client(EV_P_ session_context *sc) {
   int ret;
   packet_data *pd;
-  packet_data temp;
+  packet_data temp = { .length = sizeof(temp.payload) };
 
   ret = mbedtls_ssl_read(&sc->ssl, temp.payload, temp.length);
   switch (ret) {
@@ -612,13 +612,18 @@ static void session_receive_from_client(EV_P_ session_context *sc) {
       session_deferred_free_after_error(sc, ret, "session_receive_from_client - unknwon error");
       return;
     }
+    /* ret is the number of plaintext bytes received */
     log_debug("(%s:%d) %d bytes read from DTLS socket",
             sc->client_ip_str, sc->client_port, ret);
 
-    pd = malloc(sizeof(packet_data));
-    pd->next = 0;
+    if (ret > PACKET_DATA_BUFFER_SIZE) {
+      session_deferred_free_after_error(sc, 0, "session_receive_from_client - packet payload too big");
+      return;
+    }
+    pd = calloc(1, sizeof(packet_data));
     memcpy(pd->payload, temp.payload, ret);
     pd->length = ret;
+    pd->next = 0;
     LL_APPEND(sc->from_client, pd);
     session_mark_activity(EV_A_ sc);
     ev_io_start(EV_A_ &sc->backend_wr_watcher);
@@ -662,9 +667,8 @@ static void session_send_to_backend(EV_P_ session_context *sc) {
 static void session_receive_from_backend(EV_P_ session_context *sc) {
   int ret;
   packet_data *pd;
-  packet_data temp;
+  packet_data temp = { .length = sizeof(temp.payload) };
 
-  temp.length = sizeof(temp.payload);
   ret = mbedtls_net_recv(&sc->backend_fd, temp.payload, temp.length);
   if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_NET_RECV_FAILED) {
     session_mark_activity(EV_A_ sc);
@@ -674,12 +678,17 @@ static void session_receive_from_backend(EV_P_ session_context *sc) {
     session_deferred_free_after_error(sc, ret, "session_receive_from_backend");
     return;
   }
+  /* ret is the number of bytes read from the backend server */
   log_debug("(%s:%d) %d bytes received from backend server",
             sc->client_ip_str, sc->client_port, ret);
-  pd = malloc(sizeof(packet_data));
-  pd->next = 0;
+  if (ret > PACKET_DATA_BUFFER_SIZE) {
+    session_deferred_free_after_error(sc, 0, "session_receive_from_backend - packet payload too big");
+    return;
+  }
+  pd = calloc(1, sizeof(packet_data));
   memcpy(pd->payload, temp.payload, ret);
   pd->length = ret;
+  pd->next = 0;
   LL_APPEND(sc->from_backend, pd);
   session_mark_activity(EV_A_ sc);
   ev_io_start(EV_A_ &sc->client_wr_watcher);
@@ -901,7 +910,7 @@ static void global_cb(EV_P_ ev_io *w, int revents) {
       continue;
     }
 
-    sc = malloc(sizeof(session_context));
+    sc = calloc(1, sizeof(session_context));
 
     session_init(gc, sc, &client_fd, (unsigned char *)&client_addr, client_addr_size,
                  first_packet, first_packet_len);
