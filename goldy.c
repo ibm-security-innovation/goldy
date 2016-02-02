@@ -71,7 +71,7 @@ static void print_usage() {
      "  -b, --backend=ADDR:PORT    proxy UDP traffic to addr and port\n"
      "  -c, --cert=FILE            TLS certificate PEM filename\n"
      "  -k, --key=FILE             TLS private key PEM filename\n"
-     "  -t, --timeout=FILE         Session timeout (seconds)\n");
+     "  -t, --timeout=SECONDS      Session timeout (seconds)\n");
 }
 
 /** Parse command line arguments.
@@ -83,7 +83,7 @@ static int get_options(int argc, char **argv, struct instance *gi) {
 
   char *sep;
 
-  static const char *short_options = "hvdb:g:l:c:k:";
+  static const char *short_options = "hvdb:g:l:c:k:t:";
 
   static struct option long_options[] = {
     {"help", no_argument, NULL, 'h'},
