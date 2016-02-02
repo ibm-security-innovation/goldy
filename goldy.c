@@ -220,8 +220,7 @@ static int bind_listen_fd(global_context *gc) {
     check_return_code(ret, "bind_listen_fd");
     return ret;
   }
-  log_debug("Binded UDP %s:%s", gc->options->listen_host,
-            gc->options->listen_port);
+  log_debug("Binded UDP %s:%s", gc->options->listen_host, gc->options->listen_port);
   mbedtls_net_set_nonblock(&gc->listen_fd);
   return 0;
 }
@@ -305,8 +304,7 @@ static int global_init(const struct instance *gi, global_context *gc) {
 #endif
 
   mbedtls_ssl_conf_ca_chain(&gc->conf, gc->srvcert.next, NULL);
-  if ((ret = mbedtls_ssl_conf_own_cert(&gc->conf, &gc->srvcert,
-                                       &gc->pkey)) != 0) {
+  if ((ret = mbedtls_ssl_conf_own_cert(&gc->conf, &gc->srvcert, &gc->pkey)) != 0) {
     log_error("mbedtls_ssl_conf_own_cert returned %d", ret);
     goto exit;
   }
@@ -337,7 +335,6 @@ typedef struct packet_data {
   struct packet_data *next;
 } packet_data;
 
-
 typedef enum {
   GOLDY_SESSION_STEP_HANDSHAKE = 0,
   GOLDY_SESSION_STEP_OPERATIONAL,
@@ -345,8 +342,6 @@ typedef enum {
   GOLDY_SESSION_STEP_CLOSE_NOTIFY,
   GOLDY_SESSION_STEP_LAST,
 } session_step;
-
-
 
 typedef struct {
   const struct instance *options;
@@ -404,7 +399,7 @@ static int session_init(const global_context *gc,
    * the initial recvfrom() call on the listening fd. Here we copy the content
    * of that packet into the SSL incoming data buffer so it'll be consumed on
    * the next call to mbedtls_ssl_fetch_input(). */
-  if ( first_packet_len<MBEDTLS_SSL_BUFFER_LEN ) {
+  if (first_packet_len<MBEDTLS_SSL_BUFFER_LEN) {
     memcpy(sc->ssl.in_hdr, first_packet, first_packet_len);
     sc->ssl.in_left = first_packet_len;
   }
@@ -545,8 +540,8 @@ static int connect_to_backend(EV_P_ session_context *sc) {
     return 1;
   }
   mbedtls_net_set_nonblock(&sc->backend_fd);
-  log_info("Created socket to backend UDP %s:%s-%d",
-           sc->options->backend_host, sc->options->backend_port,sc->backend_fd.fd);
+  log_info("Created socket to backend UDP %s:%s",
+           sc->options->backend_host, sc->options->backend_port);
   ev_io_init(&sc->backend_rd_watcher, session_dispatch, sc->backend_fd.fd,
              EV_READ);
   ev_io_init(&sc->backend_wr_watcher, session_dispatch, sc->backend_fd.fd,
@@ -574,7 +569,7 @@ static void session_step_handshake(EV_P_ ev_io *w, int revents,
     log_debug("(%s:%d) DTLS handshake done", sc->client_ip_str,
               sc->client_port);
     session_mark_activity(EV_A_ sc);
-    if ( connect_to_backend(EV_A_ sc)!=0 ) {
+    if (connect_to_backend(EV_A_ sc) != 0) {
       return session_deferred_free_after_error(sc, ret, "session_step_send_backend");
     }
     sc->step = GOLDY_SESSION_STEP_OPERATIONAL;
@@ -596,7 +591,7 @@ static void session_receive_from_client(EV_P_ session_context *sc) {
   packet_data *pd;
   packet_data temp;
 
-  ret = mbedtls_ssl_read(&sc->ssl,temp.payload,temp.length);
+  ret = mbedtls_ssl_read(&sc->ssl, temp.payload, temp.length);
   switch (ret) {
   case MBEDTLS_ERR_SSL_WANT_READ:
   case MBEDTLS_ERR_SSL_WANT_WRITE:
@@ -622,9 +617,9 @@ static void session_receive_from_client(EV_P_ session_context *sc) {
 
     pd = malloc(sizeof(packet_data));
     pd->next = 0;
-    memcpy(pd->payload,temp.payload,ret);
+    memcpy(pd->payload, temp.payload, ret);
     pd->length = ret;
-    LL_APPEND(sc->from_client,pd);
+    LL_APPEND(sc->from_client, pd);
     session_mark_activity(EV_A_ sc);
     ev_io_start(EV_A_ &sc->backend_wr_watcher);
     return;
@@ -656,7 +651,7 @@ static void session_send_to_backend(EV_P_ session_context *sc) {
     log_error("Sent only %d bytes out of %d", ret, head->length);
   }
   session_mark_activity(EV_A_ sc);
-  LL_DELETE(sc->from_client,head);
+  LL_DELETE(sc->from_client, head);
   free(head);
   if (!sc->from_client) {
     ev_io_stop(EV_A_ &sc->backend_wr_watcher);
@@ -683,9 +678,9 @@ static void session_receive_from_backend(EV_P_ session_context *sc) {
             sc->client_ip_str, sc->client_port, ret);
   pd = malloc(sizeof(packet_data));
   pd->next = 0;
-  memcpy(pd->payload,temp.payload,ret);
+  memcpy(pd->payload, temp.payload, ret);
   pd->length = ret;
-  LL_APPEND(sc->from_backend,pd);
+  LL_APPEND(sc->from_backend, pd);
   session_mark_activity(EV_A_ sc);
   ev_io_start(EV_A_ &sc->client_wr_watcher);
 }
@@ -717,14 +712,14 @@ static void session_send_to_client(EV_P_ session_context *sc) {
     log_error("Sent only %d bytes out of %d", ret, head->length);
   }
   session_mark_activity(EV_A_ sc);
-  LL_DELETE(sc->from_backend,head);
+  LL_DELETE(sc->from_backend, head);
   free(head);
   if (!sc->from_backend) {
     ev_io_stop(EV_A_ &sc->client_wr_watcher);
   }
 }
 
-static void session_step_operational(EV_P_ ev_io *w, int revents,session_context *sc) {
+static void session_step_operational(EV_P_ ev_io *w, int revents, session_context *sc) {
   if ((w->fd == sc->client_fd.fd) && (revents & EV_READ)) {
     session_receive_from_client(EV_A_ sc);
   }
@@ -840,7 +835,7 @@ static int connect_to_new_client(mbedtls_net_context* client_fd,
   mbedtls_net_set_nonblock(client_fd);
   ret = bind(client_fd->fd, (struct sockaddr *)local_addr, local_addr_size);
   if (ret != 0) {
-    log_error("bind() %d failed ret=%d errno=%d", client_fd->fd,ret, errno);
+    log_error("bind() fd=%d failed ret=%d errno=%d", client_fd->fd, ret, errno);
     return 1;
   }
 
