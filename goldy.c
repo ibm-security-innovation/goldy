@@ -61,17 +61,19 @@ static void print_version() {
 
 static void print_usage() {
   printf
-    ("Usage: goldy [-hvd] -g log_level -l listen_host:port -b backend_host:port\n"
-     "             -c cert_pem_file -k private_key_pem_file\n" "\n"
-     "Options:\n" "  -h, --help                 this help\n"
+    ("Usage: goldy [-hvd] [-g log_level] [-t seconds] -l listen_host:port\n"
+     "             -b backend_host:port -c cert_pem_file -k private_key_pem_file\n"
+     "\n"
+     "Options:\n"
+     "  -h, --help                 this help\n"
      "  -v, --version              show version and exit\n"
      "  -d, --daemonize            run as a daemon\n"
-     "  -g, --log=log level        log level DEBUG/INFO/ERROR\n"
+     "  -g, --log=LEVEL            log level DEBUG/INFO/ERROR\n"
+     "  -t, --timeout=SECONDS      Session timeout (seconds)\n"
      "  -l, --listen=ADDR:PORT     listen for incoming DTLS on addr and UDP port\n"
      "  -b, --backend=ADDR:PORT    proxy UDP traffic to addr and port\n"
      "  -c, --cert=FILE            TLS certificate PEM filename\n"
-     "  -k, --key=FILE             TLS private key PEM filename\n"
-     "  -t, --timeout=SECONDS      Session timeout (seconds)\n");
+     "  -k, --key=FILE             TLS private key PEM filename\n");
 }
 
 /** Parse command line arguments.
