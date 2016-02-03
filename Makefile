@@ -27,7 +27,7 @@ LOCAL_LDFLAGS += -lz
 endif
 
 COMPILE=$(QUIET_CC) $(CC) $(LOCAL_CFLAGS) $(CFLAGS)
-LINK=$(QUIET_LINK) $(CC) $(LOCAL_LDFLAGS) $(LDFLAGS)
+LINK=$(QUIET_LINK) $(CC)
 
 ifndef V
 QUIET_CC   = @echo "  CC    $@" 1>&2;
@@ -70,16 +70,16 @@ CERT_WRITE = $(MBEDTLS_PROG_DIR)/x509/cert_write
 all: $(APP)
 
 $(APP): $(OBJS) $(MBEDTLS_LIBS) $(LIBEV_LIBS)
-	$(LINK) -o $@ $^
+	$(LINK) -o $@ $^ $(LOCAL_LDFLAGS) $(LDFLAGS)
 
 $(SEND_ONE_DTLS_PACKET): $(SEND_ONE_DTLS_PACKET_OBJS) $(MBEDTLS_LIBS)
-	$(LINK) -o $@ $^
+	$(LINK) -o $@ $^ $(LOCAL_LDFLAGS) $(LDFLAGS)
 
 $(TEST_CLIENT): $(TEST_CLIENT_OBJS) $(MBEDTLS_LIBS)
-	$(LINK) -o $@ $^
+	$(LINK) -o $@ $^ $(LOCAL_LDFLAGS) $(LDFLAGS)
 
 $(TEST_SERVER): $(TEST_SERVER_OBJS) $(LIBEV_LIBS)
-	$(LINK) -o $@ $^
+	$(LINK) -o $@ $^ $(LOCAL_LDFLAGS) $(LDFLAGS)
 
 %.o: %.c $(MBEDTLS_CONFIG_INC)
 	$(COMPILE) -o $@ -c $<
