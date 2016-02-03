@@ -21,11 +21,6 @@ ifdef DEBUG
 LOCAL_CFLAGS += -g3
 endif
 
-# Zlib shared library extensions:
-ifdef ZLIB
-LOCAL_LDFLAGS += -lz
-endif
-
 COMPILE=$(QUIET_CC) $(CC) $(LOCAL_CFLAGS) $(CFLAGS)
 LINK=$(QUIET_LINK) $(CC)
 
