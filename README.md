@@ -42,7 +42,7 @@ full-cycle test suite:
 
 Goldy is distributed under the [Apache License, version 2.0](LICENSE) .
 
-(c) Copyright IBM Corp. 2010, 2015
+(c) Copyright IBM Corp. 2015, 2016
 
 Authors: Dov Murik, Shmulik Regev
 
@@ -52,4 +52,8 @@ Contributions are gladly welcome. Please see the requirement for [Developer Cert
 
 [mbedTLS](https://tls.mbed.org/) is used as the underlying DTLS implementation.
 
-[libev](http://software.schmorp.de/pkg/libev.html) is used as an event library
+[libev](http://software.schmorp.de/pkg/libev.html) is used as an event library. It's BSD 2 clause license is used.
+
+# Contribution
+
+Contributions to the project are welcomed. It is required however to provide alongside the pull request one of the contribution forms (CLA) that are a part of the project. If the contributor is operating in his individual or personal capacity, then he/she is to use the [individual CLA](./CLA-Individual.txt); if operating in his/her role at a company or entity, then he/she must use the [corporate CLA](CLA-Corporate.txt).
