@@ -20,13 +20,16 @@ info (`-g3`).
 
 ## Help
 
-    Usage: goldy [-hv] -l listen_host:port -b backend_host:port
-                 -c cert_pem_file -k private_key_pem_file
+    Usage: goldy [-hvd] [-g log_level] [-t seconds] -l listen_host:port
+                 -b backend_host:port -c cert_pem_file -k private_key_pem_file
 
     Options:
       -h, --help                 this help
       -v, --version              show version and exit
-      -l, --listen=ADDR:PORT     listen for incoming DTLS on addr and port
+      -d, --daemonize            run as a daemon
+      -g, --log=LEVEL            log level DEBUG/INFO/ERROR
+      -t, --timeout=SECONDS      Session timeout (seconds)
+      -l, --listen=ADDR:PORT     listen for incoming DTLS on addr and UDP port
       -b, --backend=ADDR:PORT    proxy UDP traffic to addr and port
       -c, --cert=FILE            TLS certificate PEM filename
       -k, --key=FILE             TLS private key PEM filename

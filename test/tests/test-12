@@ -1,0 +1,2 @@
+DESCRIPTION="1 packet without server response"
+CLIENT_01="noreply_ABCDEFGH"
