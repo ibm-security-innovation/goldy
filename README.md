@@ -1,13 +1,12 @@
 # Goldy
 
 **goldy** is lightweight [DTLS](https://en.wikipedia.org/wiki/Datagram_Transport_Layer_Security)
-proxy which allows adding DTLS encryption to UDP servers without modifying
+proxy which allows adding DTLS encryption (using [mbed TLS](https://tls.mbed.org) ) to UDP servers without modifying
 their code.
 
-goldy uses [mbed TLS](https://tls.mbed.org) to implement DTLS.
+[Goldy's homepage at IBM developerWorks](https://developer.ibm.com/open/goldy/).
 
 [![Build Status](https://travis-ci.org/ibm-security-innovation/goldy.svg?branch=master)](https://travis-ci.org/ibm-security-innovation/goldy)
-
 ## Build
 
 To build goldy from source:
