@@ -219,6 +219,7 @@ static int bind_listen_fd(global_context *gc) {
     mbedtls_net_bind(&gc->listen_fd, gc->options->listen_host,
                      gc->options->listen_port, MBEDTLS_NET_PROTO_UDP);
   if (ret != 0) {
+    log_error("Bind failed for host %s on UDP port %s", gc->options->listen_host, gc->options->listen_port);
     check_return_code(ret, "bind_listen_fd");
     return ret;
   }
