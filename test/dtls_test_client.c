@@ -9,7 +9,7 @@
 #include "mbedtls/config.h"
 #include "mbedtls/platform.h"
 
-#include "mbedtls/net.h"
+#include "mbedtls/net_sockets.h"
 #include "mbedtls/debug.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/entropy.h"
