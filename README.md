@@ -10,7 +10,6 @@ their code.
 
 [Goldy's homepage at IBM developerWorks](https://developer.ibm.com/open/goldy/).
 
-[![Build Status](https://travis-ci.org/ibm-security-innovation/goldy.svg?branch=master)](https://travis-ci.org/ibm-security-innovation/goldy)
 ## Build
 
 To build goldy from source:
