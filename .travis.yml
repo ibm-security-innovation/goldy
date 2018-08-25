@@ -1,6 +1,9 @@
 sudo: false
+
 language: c
-script:
+
+install:
   - make deps
-  - make
-  - make test
+
+script:
+  - make && make test

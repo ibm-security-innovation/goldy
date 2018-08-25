@@ -1,12 +1,15 @@
 # Goldy
 
+[![Build Status](https://travis-ci.org/sarnold/goldy.svg?branch=master)](https://travis-ci.org/sarnold/goldy)
+[![Code Climate](https://codeclimate.com/github/sarnold/goldy/badges/gpa.svg)](https://codeclimate.com/github/sarnold/goldy)
+[![Github Issues](http://githubbadges.herokuapp.com/sarnold/goldy/issues.svg?style=flat-square&dummy)](https://github.com/sarnold/goldy/issues)
+
 **goldy** is lightweight [DTLS](https://en.wikipedia.org/wiki/Datagram_Transport_Layer_Security)
 proxy which allows adding DTLS encryption (using [mbed TLS](https://tls.mbed.org) ) to UDP servers without modifying
 their code.
 
 [Goldy's homepage at IBM developerWorks](https://developer.ibm.com/open/goldy/).
 
-[![Build Status](https://travis-ci.org/ibm-security-innovation/goldy.svg?branch=master)](https://travis-ci.org/ibm-security-innovation/goldy)
 ## Build
 
 To build goldy from source:
