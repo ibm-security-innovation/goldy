@@ -12,4 +12,6 @@ FROM alpine:3.9
 
 COPY --from=builder /src/goldy /usr/local/bin/
 
-ENTRYPOINT ["/usr/local/bin/goldy"]
+ADD entrypoint.sh /
+
+ENTRYPOINT ["/entrypoint.sh"]
