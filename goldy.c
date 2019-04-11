@@ -6,6 +6,7 @@
 #define _XOPEN_SOURCE 700
 #endif
 
+#include <arpa/inet.h>
 #include "mbedtls/config.h"
 #include "mbedtls/platform.h"
 
@@ -82,7 +83,7 @@ static void print_usage() {
  */
 static int get_options(int argc, char **argv, struct instance *gi) {
   int opt;
-
+  int last = 0;
   char *sep;
 
   static const char *short_options = "hvdb:g:l:c:k:t:";
@@ -135,7 +136,14 @@ static int get_options(int argc, char **argv, struct instance *gi) {
         log_stderr_open(LOG_ERROR);
       break;
     case 'l':                /* -l, --listen=S */
-      sep = strchr(optarg, ':');
+      for(int i = 0; i <= strlen(optarg) ; i++){
+        printf("'%c'\n",optarg[i]);
+        if(optarg[i] == ':'){
+          last = i;
+        }
+      }
+
+      sep = strchr(optarg + last, ':');
       if (!sep) {
         return 0;
       }
@@ -352,7 +360,7 @@ typedef struct {
   mbedtls_net_context backend_fd;
   mbedtls_ssl_context ssl;
   mbedtls_timing_delay_context timer;
-  unsigned char client_ip[16];
+  unsigned char client_ip[39];
   char client_ip_str[INET6_ADDRSTRLEN];
   int client_port;
   size_t cliip_len;
@@ -373,7 +381,7 @@ static void session_dispatch(EV_P_ ev_io *w, int revents);
 static int session_init(const global_context *gc,
                         session_context *sc,
                         const mbedtls_net_context *client_fd,
-                        unsigned char client_ip[16], size_t cliip_len,
+                        unsigned char client_ip[39], size_t cliip_len,
                         const unsigned char* first_packet, size_t first_packet_len) {
   int ret;
 
