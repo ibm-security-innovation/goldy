@@ -135,10 +135,11 @@ static int get_options(int argc, char **argv, struct instance *gi) {
         log_stderr_open(LOG_ERROR);
       break;
     case 'l':                /* -l, --listen=S */
-      sep = strchr(optarg, ':');
+      sep = strrchr(optarg, ':');
       if (!sep) {
         return 0;
       }
+
       *sep = '\0';
       gi->listen_host = optarg;
       gi->listen_port = sep + 1;
@@ -352,7 +353,7 @@ typedef struct {
   mbedtls_net_context backend_fd;
   mbedtls_ssl_context ssl;
   mbedtls_timing_delay_context timer;
-  unsigned char client_ip[16];
+  unsigned char client_ip[39];
   char client_ip_str[INET6_ADDRSTRLEN];
   int client_port;
   size_t cliip_len;
@@ -373,7 +374,7 @@ static void session_dispatch(EV_P_ ev_io *w, int revents);
 static int session_init(const global_context *gc,
                         session_context *sc,
                         const mbedtls_net_context *client_fd,
-                        unsigned char client_ip[16], size_t cliip_len,
+                        unsigned char client_ip[39], size_t cliip_len,
                         const unsigned char* first_packet, size_t first_packet_len) {
   int ret;
 
