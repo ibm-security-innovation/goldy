@@ -42,6 +42,21 @@ full-cycle test suite:
 
     make test
 
+## Docker use
+
+To build the Docker image:
+
+	docker build . -t goldy:latest
+
+The Docker image has an entrypoint script which makes easy to pass the certificate and key, without requiring the use of a volume. To do so, run:
+
+    docker run -e LISTEN=:::5683 \
+               -e BACKEND=<backend host:port> \
+               -e KEY=<base64> \
+               -e CERT=<base64> \
+               -p 5683:5683 \
+               <extra goldy arguments>
+
 ## License
 
 Goldy is distributed under the [Apache License, version 2.0](LICENSE) .
