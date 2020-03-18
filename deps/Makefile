@@ -28,7 +28,7 @@ build_mbedtls:
 
 download_libev:
 	@echo "Downloading libev-$(LIBEV_VER) ..."
-	@curl --fail -O http://dist.schmorp.de/libev/libev-$(LIBEV_VER).tar.gz || \
+	@curl --fail -O http://dist.schmorp.de/libev/Attic/libev-$(LIBEV_VER).tar.gz || \
 		(echo "Error downloading libev: Check the LIBEV_VER in deps/versions.mk and current version in http://dist.schmorp.de/libev/" ; exit 1)
 	tar xzf libev-$(LIBEV_VER).tar.gz
 	rm -f libev-$(LIBEV_VER).tar.gz
