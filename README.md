@@ -4,7 +4,8 @@
 proxy which allows adding DTLS encryption (using [mbed TLS](https://tls.mbed.org) ) to UDP servers without modifying
 their code.
 
-[Goldy's homepage at IBM developerWorks](https://developer.ibm.com/open/goldy/).
+* [Copy of the original Goldy homepage](docs/homepage.md)
+* [Copy of the original blog post](docs/blogpost.md)
 
 [![Build status](https://github.com/ibm-security-innovation/goldy/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/ibm-security-innovation/goldy/actions/workflows/build-and-test.yml)
 
