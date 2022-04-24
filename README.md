@@ -1,7 +1,7 @@
 # Goldy
 
 **goldy** is lightweight [DTLS](https://en.wikipedia.org/wiki/Datagram_Transport_Layer_Security)
-proxy which allows adding DTLS encryption (using [mbed TLS](https://tls.mbed.org) ) to UDP servers without modifying
+proxy which allows adding DTLS encryption (using [mbed TLS](https://tls.mbed.org)) to UDP servers without modifying
 their code.
 
 * [Copy of the original Goldy homepage](docs/homepage.md)
@@ -13,7 +13,7 @@ their code.
 
 To build goldy from source:
 
-    git clone .../goldy.git
+    git clone https://github.com/ibm-security-innovation/goldy.git
     cd goldy
     make deps
     make
@@ -48,7 +48,7 @@ full-cycle test suite:
 
 To build the Docker image:
 
-	docker build . -t goldy:latest
+    docker build . -t goldy:latest
 
 The Docker image has an entrypoint script which makes easy to pass the certificate and key, without requiring the use of a volume. To do so, run:
 
@@ -73,7 +73,7 @@ Contributions are gladly welcome. Please see the requirement for [Developer Cert
 
 [mbedTLS](https://tls.mbed.org/) is used as the underlying DTLS implementation.
 
-[libev](http://software.schmorp.de/pkg/libev.html) is used as an event library. It's BSD 2 clause license is used.
+[libev](http://software.schmorp.de/pkg/libev.html) is used as an event library. Its BSD 2 clause license is used.
 
 # Contribution
 
