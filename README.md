@@ -6,7 +6,8 @@ their code.
 
 [Goldy's homepage at IBM developerWorks](https://developer.ibm.com/open/goldy/).
 
-[![Build Status](https://travis-ci.org/ibm-security-innovation/goldy.svg?branch=master)](https://travis-ci.org/ibm-security-innovation/goldy)
+[![Build status](https://github.com/ibm-security-innovation/goldy/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/ibm-security-innovation/goldy/actions/workflows/build-and-test.yml)
+
 ## Build
 
 To build goldy from source:
