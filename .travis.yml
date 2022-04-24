@@ -1,6 +1,0 @@
-sudo: false
-language: c
-script:
-  - make deps
-  - make
-  - make test
